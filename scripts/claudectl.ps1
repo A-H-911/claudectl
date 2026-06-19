@@ -409,13 +409,11 @@ environment:
 
 # ── Dispatch ─────────────────────────────────────────────────────────────────
 
-# Cast $args to a typed string array immediately so that range-slicing
-# never unboxes a single-element result to a scalar string.
+# Cast $args to a typed string array first — slicing a string[] always
+# returns a string[], preventing single-element ranges from unboxing to scalar.
 [string[]]$_argv = @($args | ForEach-Object { [string]$_ })
-[Console]::Error.WriteLine("DIAG: args.Count=$($args.Count) argv=$($_argv -join '|') argv.GetType=$($_argv.GetType().Name)")
 $cmd  = if ($_argv.Count -gt 0) { $_argv[0] } else { "help" }
 [string[]]$rest = if ($_argv.Count -gt 1) { $_argv[1..($_argv.Count - 1)] } else { @() }
-[Console]::Error.WriteLine("DIAG: cmd='$cmd' rest.Count=$($rest.Count) rest.GetType=$($rest.GetType().Name) rest0='$($rest[0])'")
 
 
 switch ($cmd) {
