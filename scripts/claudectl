@@ -217,7 +217,7 @@ cmd_status() {
     if [ -d /proc ]; then
         for env_file in /proc/*/environ; do
             [ -r "$env_file" ] || continue
-            local pid; pid="$(echo "$env_file" | grep -oE '[0-9]+')"
+            local pid; pid="$(echo "$env_file" | grep -oE '[0-9]+')" || continue
             local config_dir
             config_dir="$(tr '\0' '\n' < "$env_file" 2>/dev/null | grep '^CLAUDE_CONFIG_DIR=' | cut -d= -f2-)" || true
             [ -z "$config_dir" ] && continue

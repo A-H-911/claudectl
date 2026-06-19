@@ -52,8 +52,9 @@ run add "-bad" 2>/dev/null; code=$?
 
 # ── list ──────────────────────────────────────────────────────────────────────
 printf "\n=== list ===\n"
-run list | grep -q "myinstance"  && ok "list: shows new instance"   || err "list" "instance not in output"
-run list | grep -q "vanilla"     && ok "list: always shows vanilla" || err "list:vanilla" "missing"
+list_out=$(run list)
+echo "$list_out" | grep -q "myinstance" && ok "list: shows new instance"   || err "list" "instance not in output"
+echo "$list_out" | grep -q "vanilla"    && ok "list: always shows vanilla" || err "list:vanilla" "missing"
 
 # list --json: schema validation
 run list --json | python3 -c "
