@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# tests/helpers/fake-claude — test double for the claude binary
+# Accepts any args Claude Code would accept; prints them; exits 0
+printf '[fake-claude] called with: %s\n' "$*"
+exit 0

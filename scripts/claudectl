@@ -1,0 +1,722 @@
+#!/usr/bin/env bash
+# claudectl — manage isolated Claude Code instances
+# https://github.com/A-H-911/claudectl  ← update this when forking
+
+set -euo pipefail
+
+VERSION="0.1.0"
+CLAUDECTL_UPDATE_URL="${CLAUDECTL_UPDATE_URL:-https://raw.githubusercontent.com/A-H-911/claudectl/main/scripts/claudectl}"
+BASE="${CLAUDECTL_BASE:-$HOME/.claude-instances}"
+BIN="${CLAUDECTL_BIN:-$HOME/.local/bin}"
+MARKER="managed by claudectl"
+
+# ── Utilities ────────────────────────────────────────────────────────────────
+
+die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+
+confirm() {
+    local msg="$1"
+    [[ "${2:-}" == "--force" ]] && return 0
+    printf '%s [y/N] ' "$msg"
+    read -r reply
+    [[ "$reply" =~ ^[Yy]$ ]] || die "aborted"
+}
+
+require_instance() {
+    local name="$1"
+    [ "$name" = "vanilla" ] && return 0
+    [ -d "$BASE/$name" ] || die "instance '$name' not found — run 'claudectl list' to see available instances"
+}
+
+validate_name() {
+    local name="$1"
+    [[ "$name" =~ ^[a-zA-Z0-9][-a-zA-Z0-9_]*$ ]] || \
+        die "invalid name '$name' — use letters, numbers, hyphens, underscores only (no spaces)"
+}
+
+elapsed() {
+    local secs=$(( $(date +%s) - $1 ))
+    local h=$((secs/3600)) m=$(( (secs%3600)/60 )) s=$((secs%60))
+    [ $h -gt 0 ] && printf '%dh %dm' $h $m || [ $m -gt 0 ] && printf '%dm %ds' $m $s || printf '%ds' $s
+}
+
+# ── cmd_add ──────────────────────────────────────────────────────────────────
+
+cmd_add() {
+    local name="${1:-}" force=""
+    [ -z "$name" ] && die "usage: claudectl add <name> [--force]"
+    shift
+    [[ "${1:-}" == "--force" ]] && force="--force"
+    validate_name "$name"
+    local dir="$BASE/$name"
+    local launcher="$BIN/claude-$name"
+
+    if [ -d "$dir" ] && [ -z "$force" ]; then
+        die "instance '$name' already exists — use --force to reinitialise"
+    fi
+
+    mkdir -p "$dir" && chmod 700 "$dir"
+
+    # Launcher uses expanded $BIN and $dir so CLAUDECTL_BIN override works in tests.
+    # $@ is escaped (\$@) so it is written literally into the launcher file.
+    cat > "$launcher" <<EOF
+#!/usr/bin/env bash
+# claude-${name} — isolated Claude Code instance "${name}" (${MARKER})
+export CLAUDE_CONFIG_DIR="${dir}"
+exec "${BIN}/claude" "\$@"
+EOF
+    chmod +x "$launcher"
+
+    printf 'created instance "%s"\n' "$name"
+    printf '  config  : %s\n' "$dir"
+    printf '  command : claude-%s\n' "$name"
+    printf '  next    : run `claude-%s`, then complete /login\n' "$name"
+    printf '            (over SSH: press c to copy the URL, then paste the code back)\n'
+}
+
+# ── cmd_list ─────────────────────────────────────────────────────────────────
+
+cmd_list() {
+    local json="${1:-}"
+    local logged_in_vanilla
+    logged_in_vanilla="$([ -f "$HOME/.claude/.credentials.json" ] && echo yes || echo no)"
+
+    if [ "$json" = "--json" ]; then
+        local logged_bool
+        logged_bool="$([ "$logged_in_vanilla" = "yes" ] && echo true || echo false)"
+        printf '[\n'
+        printf '  {"name":"vanilla","config_dir":"%s","logged_in":%s}' \
+            "$HOME/.claude" "$logged_bool"
+        if [ -d "$BASE" ]; then
+            for dir in "$BASE"/*/; do
+                [ -d "$dir" ] || continue
+                local n; n="$(basename "$dir")"
+                local logged; logged="$([ -f "${dir%/}/.credentials.json" ] && echo true || echo false)"
+                printf ',\n  {"name":"%s","config_dir":"%s","logged_in":%s}' \
+                    "$n" "${dir%/}" "$logged"
+            done
+        fi
+        printf '\n]\n'
+    else
+        printf '%-16s  %-50s  %s\n' NAME CONFIG_DIR LOGGED_IN
+        printf '%-16s  %-50s  %s\n' "vanilla" "$HOME/.claude" "$logged_in_vanilla"
+        if [ -d "$BASE" ]; then
+            for dir in "$BASE"/*/; do
+                [ -d "$dir" ] || continue
+                local n; n="$(basename "$dir")"
+                local logged; logged="$([ -f "${dir%/}/.credentials.json" ] && echo yes || echo no)"
+                printf '%-16s  %-50s  %s\n' "$n" "${dir%/}" "$logged"
+            done
+        fi
+    fi
+}
+
+# ── cmd_path ─────────────────────────────────────────────────────────────────
+
+cmd_path() {
+    local name="${1:-}"
+    [ -z "$name" ] && die "usage: claudectl path <name>"
+    if [ "$name" = "vanilla" ]; then
+        printf '%s\n' "$HOME/.claude"
+    else
+        require_instance "$name"
+        printf '%s\n' "$BASE/$name"
+    fi
+}
+
+# ── cmd_reset ────────────────────────────────────────────────────────────────
+
+cmd_reset() {
+    local name="${1:-}" force=""
+    [ -z "$name" ] && die "usage: claudectl reset <name> [--force]"
+    shift
+    [[ "${1:-}" == "--force" ]] && force="--force"
+    [ "$name" = "vanilla" ] && die "cannot reset the vanilla instance"
+    require_instance "$name"
+    local dir="$BASE/$name"
+    confirm "wipe all config in '$name'? this cannot be undone" "$force"
+    rm -rf "$dir"
+    mkdir -p "$dir" && chmod 700 "$dir"
+    printf 'reset instance "%s" — config dir wiped, launcher kept\n' "$name"
+}
+
+# ── cmd_remove ───────────────────────────────────────────────────────────────
+
+cmd_remove() {
+    local name="${1:-}" purge="" force=""
+    [ -z "$name" ] && die "usage: claudectl remove <name> [--purge] [--force]"
+    shift
+    for arg in "$@"; do
+        case "$arg" in
+            --purge) purge=1 ;;
+            --force|-y) force="--force" ;;
+        esac
+    done
+    [ "$name" = "vanilla" ] && die "cannot remove the vanilla instance"
+    require_instance "$name"
+    local dir="$BASE/$name"
+    local launcher="$BIN/claude-$name"
+
+    if [ -n "$purge" ]; then
+        confirm "permanently remove launcher AND config for '$name'?" "$force"
+        rm -f "$launcher"
+        rm -rf "$dir"
+        printf 'removed launcher and config for "%s"\n' "$name"
+    else
+        confirm "remove launcher for '$name'? (config dir kept)" "$force"
+        rm -f "$launcher"
+        printf 'removed launcher for "%s" (config dir kept at %s)\n' "$name" "$dir"
+        printf 'use --purge to also remove the config directory\n'
+    fi
+}
+
+# ── cmd_spawn ────────────────────────────────────────────────────────────────
+
+cmd_spawn() {
+    local name="${1:-}" project="" dry_run=""
+    local -a claude_args=()
+    [ -z "$name" ] && die "usage: claudectl spawn <name> [--project <dir>] [--dry-run] [-- <claude-args>...]"
+    shift
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --project) project="$2"; shift 2 ;;
+            --dry-run) dry_run=1; shift ;;
+            --) shift; claude_args=("$@"); break ;;
+            *) die "unknown spawn flag: $1" ;;
+        esac
+    done
+
+    require_instance "$name"
+    local launcher="$BIN/claude-$name"
+    [ -f "$launcher" ] || die "launcher '$launcher' not found — run 'claudectl add $name' again"
+
+    if [ -n "$project" ]; then
+        [ -d "$project" ] || die "project directory '$project' not found"
+        cd "$project"
+    fi
+
+    if [ -n "$dry_run" ]; then
+        if [ ${#claude_args[@]} -gt 0 ]; then
+            printf '%s %s\n' "$launcher" "${claude_args[*]}"
+        else
+            printf '%s\n' "$launcher"
+        fi
+        return 0
+    fi
+
+    exec "$launcher" "${claude_args[@]+"${claude_args[@]}"}"
+}
+
+# ── cmd_status ───────────────────────────────────────────────────────────────
+
+cmd_status() {
+    local json="${1:-}"
+    local -a results=()
+
+    if [ -d /proc ]; then
+        for env_file in /proc/*/environ; do
+            [ -r "$env_file" ] || continue
+            local pid; pid="$(echo "$env_file" | grep -oE '[0-9]+')"
+            local config_dir
+            config_dir="$(tr '\0' '\n' < "$env_file" 2>/dev/null | grep '^CLAUDE_CONFIG_DIR=' | cut -d= -f2-)" || true
+            [ -z "$config_dir" ] && continue
+            local start; start="$(stat -c%Y /proc/"$pid" 2>/dev/null)" || continue
+            local inst_name="<unknown>"
+            if [ -d "$BASE" ]; then
+                for dir in "$BASE"/*/; do
+                    [ "${dir%/}" = "$config_dir" ] && inst_name="$(basename "$dir")" && break
+                done
+            fi
+            [ "$config_dir" = "$HOME/.claude" ] && inst_name="vanilla"
+            results+=("$pid|$inst_name|$config_dir|$start")
+        done
+    fi
+
+    if [ "$json" = "--json" ]; then
+        printf '[\n'
+        local first=true
+        for r in "${results[@]+"${results[@]}"}"; do
+            IFS='|' read -r pid inst cfg start <<< "$r"
+            [ "$first" = true ] && first=false || printf ','
+            printf '\n  {"pid":%s,"instance":"%s","config_dir":"%s"}' "$pid" "$inst" "$cfg"
+        done
+        printf '\n]\n'
+        return 0
+    fi
+
+    if [ ${#results[@]} -eq 0 ]; then
+        printf 'no Claude instances currently running\n'
+        return 0
+    fi
+    printf '%-8s  %-16s  %-50s  %s\n' PID INSTANCE CONFIG_DIR ELAPSED
+    for r in "${results[@]}"; do
+        IFS='|' read -r pid inst cfg start <<< "$r"
+        printf '%-8s  %-16s  %-50s  %s\n' "$pid" "$inst" "$cfg" "$(elapsed "$start")"
+    done
+}
+
+# ── cmd_clone ────────────────────────────────────────────────────────────────
+
+cmd_clone() {
+    local src="${1:-}" dst="${2:-}" deep=""
+    [ -z "$src" ] || [ -z "$dst" ] && die "usage: claudectl clone <src> <dst> [--deep]"
+    [[ "${3:-}" == "--deep" ]] && deep=1
+    require_instance "$src"
+    require_instance "$dst"
+
+    local src_dir dst_dir
+    [ "$src" = "vanilla" ] && src_dir="$HOME/.claude" || src_dir="$BASE/$src"
+    [ "$dst" = "vanilla" ] && dst_dir="$HOME/.claude" || dst_dir="$BASE/$dst"
+
+    # Denylist — these are NEVER copied regardless of --deep
+    # NEVER copy — auth tokens; each instance must /login independently
+    # NEVER copy — auto-generated state; useless or misleading in a new instance
+    local -a denylist=(".credentials.json" "cache" "backups" "sessions" "history.jsonl" "telemetry" "usage-data" "mcp-needs-auth-cache.json")
+
+    is_denied() {
+        local item_name="$1"
+        for d in "${denylist[@]}"; do [ "$item_name" = "$d" ] && return 0; done
+        return 1
+    }
+
+    if [ -n "$deep" ]; then
+        shopt -s dotglob nullglob
+        for item in "$src_dir"/*; do
+            local base_item; base_item="$(basename "$item")"
+            is_denied "$base_item" && continue
+            cp -r "$item" "$dst_dir/"
+        done
+        shopt -u dotglob nullglob
+        printf 'deep-cloned "%s" → "%s" (credentials and cache excluded)\n' "$src" "$dst"
+    else
+        if [ -f "$src_dir/settings.json" ]; then
+            cp "$src_dir/settings.json" "$dst_dir/settings.json"
+            printf 'cloned settings.json from "%s" → "%s"\n' "$src" "$dst"
+        else
+            printf 'note: "%s" has no settings.json yet — nothing to clone\n' "$src"
+        fi
+    fi
+}
+
+# ── cmd_config ───────────────────────────────────────────────────────────────
+
+cmd_config() {
+    local name="${1:-}"
+    [ -z "$name" ] && die "usage: claudectl config <name> [<key> [<value>]]"
+    require_instance "$name"
+    local dir; [ "$name" = "vanilla" ] && dir="$HOME/.claude" || dir="$BASE/$name"
+    local settings="$dir/settings.json"
+    shift
+
+    local key="${1:-}" val="${2:-}"
+
+    if [ -z "$key" ]; then
+        [ -f "$settings" ] && cat "$settings" || printf '{}\n'
+        return 0
+    fi
+
+    if [ -z "$val" ]; then
+        [ -f "$settings" ] || { printf '\n'; return 0; }
+        if command -v jq >/dev/null 2>&1; then
+            jq -r ".$key // empty" "$settings"
+        else
+            python3 - "$settings" "$key" <<'PYEOF'
+import json, sys
+data = json.load(open(sys.argv[1]))
+print(data.get(sys.argv[2], ''))
+PYEOF
+        fi
+        return 0
+    fi
+
+    [ -f "$settings" ] || printf '{}' > "$settings"
+    if command -v jq >/dev/null 2>&1; then
+        local tmp; tmp="$(mktemp)"
+        jq ".$key = $(printf '%s' "$val" | jq -R .)" "$settings" > "$tmp" && mv "$tmp" "$settings"
+    else
+        python3 - "$settings" "$key" "$val" <<'PYEOF'
+import json, sys
+try:
+    data = json.load(open(sys.argv[1]))
+except Exception:
+    data = {}
+data[sys.argv[2]] = sys.argv[3]
+json.dump(data, open(sys.argv[1], 'w'), indent=2)
+PYEOF
+    fi
+    printf 'set %s = %s in "%s"\n' "$key" "$val" "$name"
+}
+
+# ── cmd_token ────────────────────────────────────────────────────────────────
+
+cmd_token() {
+    local name="${1:-}"
+    [ -z "$name" ] && die "usage: claudectl token <name>"
+    require_instance "$name"
+    local dir; [ "$name" = "vanilla" ] && dir="$HOME/.claude" || dir="$BASE/$name"
+    local creds="$dir/.credentials.json"
+
+    if [ ! -f "$creds" ]; then
+        printf 'instance "%s" has not completed /login\n' "$name" >&2
+        printf 'run `claude-%s`, then complete /login inside Claude Code\n' "$name" >&2
+        exit 1
+    fi
+
+    printf 'credentials: %s\n' "$creds"
+    printf 'CI usage:    export CLAUDE_CODE_OAUTH_TOKEN=$(jq -r .oauthToken %s)\n' "$creds"
+}
+
+# ── cmd_version ──────────────────────────────────────────────────────────────
+
+cmd_version() {
+    printf 'claudectl %s\n' "$VERSION"
+    if command -v "$BIN/claude" >/dev/null 2>&1; then
+        "$BIN/claude" --version 2>/dev/null || true
+    elif command -v claude >/dev/null 2>&1; then
+        claude --version 2>/dev/null || true
+    fi
+}
+
+# ── cmd_setup ────────────────────────────────────────────────────────────────
+
+cmd_setup() {
+    local update="${1:-}"
+
+    if [ "$update" = "--update" ]; then
+        local script_path="$0"
+        case "$script_path" in
+            /*) ;;
+            *) script_path="$(cd "$(dirname "$script_path")" && pwd)/$(basename "$script_path")";;
+        esac
+        command -v curl >/dev/null 2>&1 || die "curl is required for --update"
+        local tmp; tmp="$(mktemp)"
+        printf 'downloading latest claudectl...\n'
+        curl -fsSL "$CLAUDECTL_UPDATE_URL" -o "$tmp" || { rm -f "$tmp"; die "update download failed"; }
+        chmod +x "$tmp"
+        mv "$tmp" "$script_path"
+        printf 'updated to version: %s\n' "$(bash "$script_path" version)"
+        return 0
+    fi
+
+    local claude_bin="$BIN/claude"
+    if [ ! -f "$claude_bin" ] && ! command -v claude >/dev/null 2>&1; then
+        printf 'Claude Code is not installed.\n'
+        printf 'Install it from: https://claude.ai/download\n'
+        printf 'Then re-run: claudectl setup\n'
+        exit 1
+    fi
+    printf 'claude binary: %s\n' "$([ -f "$claude_bin" ] && echo "$claude_bin" || command -v claude)"
+
+    if ! echo "$PATH" | tr ':' '\n' | grep -qx "$BIN"; then
+        printf 'adding %s to PATH in shell rc files...\n' "$BIN"
+        local line="export PATH=\"$BIN:\$PATH\""
+        for rc in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile"; do
+            [ -f "$rc" ] && grep -qF "$BIN" "$rc" || printf '\n# added by claudectl\n%s\n' "$line" >> "$rc"
+        done
+        printf 'done — open a new terminal (or run: source ~/.bashrc) to activate\n'
+    else
+        printf 'PATH already includes %s\n' "$BIN"
+    fi
+
+    printf '\nclaudectl %s is ready\n' "$VERSION"
+}
+
+# ── Help ─────────────────────────────────────────────────────────────────────
+
+help_add() {
+    cat <<'HELP'
+claudectl add <name> [--force]
+
+Create a new isolated Claude Code instance.
+
+  Creates:
+    $CLAUDECTL_BASE/<name>/       config directory (chmod 700)
+    $CLAUDECTL_BIN/claude-<name>  launcher script
+
+  --force   overwrite if instance already exists
+
+  Name rules: letters, numbers, hyphens, underscores only (no spaces)
+
+  After adding, run `claude-<name>` and complete /login.
+  Each instance maintains its own credentials, settings, and history.
+
+  Example:
+    claudectl add work
+    claudectl add personal
+    claude-work   # starts Claude Code with the 'work' instance config
+HELP
+}
+
+help_list() {
+    cat <<'HELP'
+claudectl list [--json]
+
+List all managed instances plus the built-in vanilla instance.
+
+  Columns: NAME, CONFIG_DIR, LOGGED_IN
+
+  --json   output as JSON array:
+           [{"name":"...","config_dir":"...","logged_in":true|false}]
+
+  The 'vanilla' instance always appears first and represents
+  ~/.claude (the default Claude Code config directory).
+
+  Example:
+    claudectl list
+    claudectl list --json | jq '.[].name'
+HELP
+}
+
+help_path() {
+    cat <<'HELP'
+claudectl path <name>
+
+Print the config directory for an instance. Useful for scripting.
+
+  Special case: 'path vanilla' returns ~/.claude
+
+  Example:
+    claudectl path work
+    cd "$(claudectl path work)"
+    ls "$(claudectl path personal)"
+HELP
+}
+
+help_reset() {
+    cat <<'HELP'
+claudectl reset <name> [--force]
+
+Wipe all config files in an instance (credentials, settings, history).
+The launcher script is preserved.
+
+  --force   skip confirmation prompt
+
+  This is equivalent to /logout + factory reset of that instance.
+  You will need to /login again after reset.
+
+  The 'vanilla' instance cannot be reset.
+
+  Example:
+    claudectl reset work           # prompts for confirmation
+    claudectl reset work --force   # no prompt
+HELP
+}
+
+help_remove() {
+    cat <<'HELP'
+claudectl remove <name> [--purge] [--force]
+
+Remove the launcher script for an instance.
+
+  --purge   also remove the config directory (irreversible)
+  --force   skip confirmation prompt
+
+  Without --purge: config data is kept at $CLAUDECTL_BASE/<name>/
+  With --purge:    both launcher and config are permanently deleted
+
+  The 'vanilla' instance cannot be removed.
+
+  Example:
+    claudectl remove old-project           # removes launcher only
+    claudectl remove old-project --purge   # removes launcher + config
+HELP
+}
+
+help_spawn() {
+    cat <<'HELP'
+claudectl spawn <name> [--project <dir>] [--dry-run] [-- <claude-args>...]
+
+Launch Claude Code using a specific instance.
+
+  --project <dir>   cd to <dir> before spawning (validated; exits 1 if missing)
+  --dry-run         print the command that would run; do NOT execute
+  --                everything after -- is passed directly to claude
+
+  Note: on Linux/macOS, spawn replaces the current shell process (exec).
+        The shell does not return after Claude exits.
+
+  Headless usage (for CI/scripts):
+    claudectl spawn ci -- --bare -p "summarize changes"
+    nohup claudectl spawn ci -- --bare -p "task" > out.log &
+
+  --bare skips hooks, LSP init, and plugin sync (per Claude Code docs).
+
+  Example:
+    claudectl spawn work
+    claudectl spawn work --project ~/repos/myapp
+    claudectl spawn work --dry-run -- --bare -p "explain this"
+HELP
+}
+
+help_status() {
+    cat <<'HELP'
+claudectl status [--json]
+
+Show currently running Claude Code instances.
+
+  Linux/macOS: reads /proc/*/environ to identify CLAUDE_CONFIG_DIR per PID
+  Windows:     uses Get-Process; per-instance attribution not available
+
+  --json   output as JSON array
+
+  Example:
+    claudectl status
+    claudectl status --json
+HELP
+}
+
+help_clone() {
+    cat <<'HELP'
+claudectl clone <src> <dst> [--deep]
+
+Copy configuration from one instance to another.
+
+  Default (no --deep): copies settings.json only
+  --deep:              copies everything except the denylist below
+
+  Denylist (never copied):
+    .credentials.json          each instance must /login independently
+    cache/  sessions/          auto-generated, instance-specific state
+    backups/  history.jsonl    auto-generated, instance-specific state
+    telemetry/  usage-data/    auto-generated
+    mcp-needs-auth-cache.json  auto-generated
+
+  Both src and dst must already exist (run 'claudectl add' first).
+
+  Example:
+    claudectl add staging
+    claudectl clone work staging            # copies settings only
+    claudectl clone work staging --deep     # copies plugins etc.
+HELP
+}
+
+help_config() {
+    cat <<'HELP'
+claudectl config <name> [<key> [<value>]]
+
+Read or write settings.json for an instance.
+
+  claudectl config <name>            pretty-print full settings.json
+  claudectl config <name> <key>      read one key
+  claudectl config <name> <key> <v>  set one key
+
+  Creates settings.json if it doesn't exist yet.
+  Gracefully handles new instances with no settings file.
+
+  Requires: jq (preferred) or python3 (fallback)
+  Note: deep/nested keys (e.g. hooks.0.command) require jq.
+
+  Example:
+    claudectl config work
+    claudectl config work model
+    claudectl config work model claude-opus-4-5
+HELP
+}
+
+help_token() {
+    cat <<'HELP'
+claudectl token <name>
+
+Show the credentials file path and CI usage hint for an instance.
+
+  Prints the path to .credentials.json and the command to extract
+  the OAuth token for use with CLAUDE_CODE_OAUTH_TOKEN in CI.
+
+  Exits 1 if the instance has not completed /login.
+
+  Example:
+    claudectl token work
+    export CLAUDE_CODE_OAUTH_TOKEN=$(jq -r .oauthToken "$(claudectl path work)/.credentials.json")
+HELP
+}
+
+help_version() {
+    cat <<'HELP'
+claudectl version
+
+Print claudectl version and Claude Code version.
+HELP
+}
+
+help_setup() {
+    cat <<'HELP'
+claudectl setup [--update]
+
+Verify installation and configure PATH.
+
+  Checks that the Claude Code binary exists at $CLAUDECTL_BIN/claude.
+  If not found, prints the download URL and exits 1.
+  Adds $CLAUDECTL_BIN to PATH in ~/.bashrc, ~/.zshrc, and ~/.profile.
+
+  --update   self-update claudectl to the latest version from:
+             $CLAUDECTL_UPDATE_URL
+             Requires: curl
+             Note: not tested in CI (requires network + self-modification).
+
+  Note: ~/.local/bin is often absent from non-interactive SSH sessions.
+  Open a new login shell or run 'source ~/.bashrc' after setup.
+
+  Example:
+    claudectl setup
+    claudectl setup --update
+HELP
+}
+
+cmd_help() {
+    local sub="${1:-}"
+    if [ -n "$sub" ]; then
+        "help_$sub" 2>/dev/null || die "unknown command '$sub'"
+        return
+    fi
+    cat <<HELP
+claudectl ${VERSION} — manage isolated Claude Code instances
+
+usage: claudectl <command> [options]
+
+commands:
+  add <name>              create a new isolated instance
+  list                    list all instances
+  path <name>             print config directory path
+  reset <name>            wipe instance config (keep launcher)
+  remove <name>           remove instance launcher [--purge removes config too]
+  spawn <name>            launch Claude Code for an instance
+  status                  show running Claude instances
+  clone <src> <dst>       copy settings between instances
+  config <name>           read/write instance settings.json
+  token <name>            show credentials path and CI usage
+  version                 show claudectl and claude version
+  setup                   verify install and configure PATH
+
+run 'claudectl help <command>' for detailed help on any command
+
+environment:
+  CLAUDECTL_BASE          instance storage root (default: ~/.claude-instances)
+  CLAUDECTL_BIN           binary/launcher dir (default: ~/.local/bin)
+  CLAUDECTL_UPDATE_URL    self-update source URL
+HELP
+}
+
+# ── Dispatch ─────────────────────────────────────────────────────────────────
+
+cmd="${1:-help}"
+[ $# -gt 0 ] && shift || true
+
+case "$cmd" in
+    add)                cmd_add "$@" ;;
+    list|ls)            cmd_list "$@" ;;
+    path)               cmd_path "$@" ;;
+    reset)              cmd_reset "$@" ;;
+    remove|rm)          cmd_remove "$@" ;;
+    spawn)              cmd_spawn "$@" ;;
+    status)             cmd_status "$@" ;;
+    clone)              cmd_clone "$@" ;;
+    config)             cmd_config "$@" ;;
+    token)              cmd_token "$@" ;;
+    version|--version)  cmd_version ;;
+    setup)              cmd_setup "$@" ;;
+    help|--help|-h)     cmd_help "$@" ;;
+    *)                  printf 'error: unknown command "%s"\n\n' "$cmd" >&2
+                        cmd_help >&2
+                        exit 2 ;;
+esac
