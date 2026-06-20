@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.1] — 2026-06-20
+
+### Added
+
+- Branch-level test coverage in both suites (`test_claudectl.sh`, `test_claudectl.ps1`), kept in parity:
+  - Missing-name usage errors for all name-taking commands
+  - `require_instance` / `Assert-Instance` failures on `reset`, `remove`, `config`, `token`, and `clone` source
+  - `spawn` launcher-missing branch and the valid `--project` + `--dry-run` path
+  - Dispatch aliases (`ls`, `rm`, `--version`, `--help`, `-h`) and bare-invocation default-to-help
+  - `confirm` prompt behaviour — `n` aborts (config survives), `y` proceeds (bash-only; PowerShell
+    `Read-Host` cannot reliably read redirected stdin)
+
 ## [0.2.0] — 2026-06-20
 
 ### Added
