@@ -259,6 +259,69 @@ done
 run help no-such-subcommand 2>/dev/null; code=$?
 [ $code -eq 1 ]  && ok "help: unknown subcommand exits 1" || err "help:unknown" "got exit $code"
 
+# ── missing-name usage errors ──────────────────────────────────────────────────
+# Every name-taking command must die with exit 1 when invoked with no name.
+# </dev/null guards the two that would otherwise hit an interactive prompt.
+printf "\n=== missing-name usage ===\n"
+for c in add path reset remove spawn clone config token; do
+    run "$c" </dev/null >/dev/null 2>&1; code=$?
+    [ $code -eq 1 ] && ok "$c: missing name exits 1" || err "$c:missing-name" "got exit $code"
+done
+
+# ── instance-not-found errors ───────────────────────────────────────────────────
+# require_instance must reject unknown instances on every command that consumes one.
+# clone checks <src> before <dst>, so a bogus src dies regardless of dst.
+printf "\n=== instance not found ===\n"
+run reset ghost --force </dev/null 2>/dev/null;  code=$?; [ $code -eq 1 ] && ok "reset: unknown instance exits 1"  || err "reset:ghost"  "got exit $code"
+run remove ghost --force </dev/null 2>/dev/null; code=$?; [ $code -eq 1 ] && ok "remove: unknown instance exits 1" || err "remove:ghost" "got exit $code"
+run config ghost 2>/dev/null;                    code=$?; [ $code -eq 1 ] && ok "config: unknown instance exits 1" || err "config:ghost" "got exit $code"
+run token ghost 2>/dev/null;                     code=$?; [ $code -eq 1 ] && ok "token: unknown instance exits 1"  || err "token:ghost"  "got exit $code"
+run clone ghost-src ghost-dst 2>/dev/null;       code=$?; [ $code -eq 1 ] && ok "clone: unknown src exits 1"       || err "clone:ghost-src" "got exit $code"
+
+# ── spawn: launcher-missing branch ──────────────────────────────────────────────
+# Instance dir exists but the launcher was deleted → spawn must refuse (not exec a ghost).
+printf "\n=== spawn launcher-missing ===\n"
+run add launchergone >/dev/null 2>&1
+rm -f "$CLAUDECTL_BIN/claude-launchergone"
+run spawn launchergone --dry-run </dev/null 2>/dev/null; code=$?
+[ $code -eq 1 ] && ok "spawn: missing launcher exits 1" || err "spawn:launcher-missing" "got exit $code"
+
+# ── spawn: valid --project + --dry-run ──────────────────────────────────────────
+# Exercises the cd-into-project branch (only the missing-dir path was tested before).
+printf "\n=== spawn --project (valid) ===\n"
+PROJDIR="$TMPROOT/projdir"; mkdir -p "$PROJDIR"
+run add projinst >/dev/null 2>&1
+out=$(run spawn projinst --project "$PROJDIR" --dry-run 2>&1); code=$?
+{ [ $code -eq 0 ] && echo "$out" | grep -q "claude-projinst"; } \
+              && ok "spawn --project (valid dir): dry-run prints launcher (exit 0)" || err "spawn:project-valid" "exit $code: $out"
+
+# ── confirm prompt (interactive, non-force) ─────────────────────────────────────
+# reset/remove without --force read stdin. 'n' must abort (exit 1) AND leave config intact;
+# 'y' must proceed. Validates the behaviour, not just the exit code.
+printf "\n=== confirm prompt ===\n"
+run add aborttest >/dev/null 2>&1
+printf '{"k":"v"}' > "$CLAUDECTL_BASE/aborttest/settings.json"
+printf 'n\n' | run reset aborttest >/dev/null 2>&1; code=$?
+{ [ $code -eq 1 ] && [ -f "$CLAUDECTL_BASE/aborttest/settings.json" ]; } \
+              && ok "confirm: 'n' aborts reset (exit 1) and config survives" || err "confirm:abort" "exit $code (config wiped=$([ -f "$CLAUDECTL_BASE/aborttest/settings.json" ] && echo no || echo yes))"
+printf 'y\n' | run reset aborttest >/dev/null 2>&1; code=$?
+{ [ $code -eq 0 ] && [ ! -f "$CLAUDECTL_BASE/aborttest/settings.json" ]; } \
+              && ok "confirm: 'y' proceeds with reset (config wiped)" || err "confirm:proceed" "exit $code"
+
+# ── dispatch aliases & no-arg default ───────────────────────────────────────────
+# ls→list, rm→remove, --version→version, --help/-h→help, and bare invocation→help.
+# Capture to a var and match with [[ == *..* ]] — no pipe, so set -o pipefail can't
+# trip on a SIGPIPE race when a downstream `grep -q` would close the pipe early.
+printf "\n=== dispatch aliases ===\n"
+out=$(run ls);        [[ "$out" == *vanilla*   ]] && ok "alias: 'ls' dispatches to list"           || err "alias:ls" "vanilla not in output"
+run add rmalias >/dev/null 2>&1
+run rm rmalias --force >/dev/null 2>&1
+[ ! -f "$CLAUDECTL_BIN/claude-rmalias" ]          && ok "alias: 'rm' dispatches to remove"          || err "alias:rm" "launcher still present"
+out=$(run --version); [[ "$out" == *claudectl* ]] && ok "alias: '--version' dispatches to version"  || err "alias:--version" "missing"
+out=$(run --help);    [[ "$out" == *usage:*    ]] && ok "alias: '--help' dispatches to help"        || err "alias:--help" "no usage banner"
+out=$(run -h);        [[ "$out" == *usage:*    ]] && ok "alias: '-h' dispatches to help"            || err "alias:-h" "no usage banner"
+out=$(run);           [[ "$out" == *usage:*    ]] && ok "no-arg invocation defaults to help"        || err "no-arg" "no usage banner"
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 printf "\n"
 printf "Results: \033[32m%d passed\033[0m, \033[31m%d failed\033[0m\n" "$pass" "$fail"

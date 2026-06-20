@@ -195,6 +195,61 @@ foreach ($cmd in @("add","list","path","reset","remove","spawn","status","clone"
 $null = run help no-such-subcommand 2>&1; $code = $LASTEXITCODE
 if ($code -ne 0) { ok "help: unknown subcommand exits non-zero" } else { err "help:unknown" "got exit $code" }
 
+# ── missing-name usage errors ──────────────────────────────────────────────────
+# Every name-taking command must exit non-zero when invoked with no name.
+Write-Host "`n=== missing-name usage ==="
+foreach ($c in @("add","path","reset","remove","spawn","clone","config","token")) {
+    $null = run $c 2>&1; $code = $LASTEXITCODE
+    if ($code -ne 0) { ok "${c}: missing name exits non-zero" } else { err "$c:missing-name" "got exit $code" }
+}
+
+# ── instance-not-found errors ───────────────────────────────────────────────────
+# Assert-Instance must reject unknown instances. clone checks <src> before <dst>.
+Write-Host "`n=== instance not found ==="
+$null = run reset ghost --force 2>&1;  $code = $LASTEXITCODE; if ($code -ne 0) { ok "reset: unknown instance exits non-zero" }  else { err "reset:ghost"  "got exit $code" }
+$null = run remove ghost --force 2>&1; $code = $LASTEXITCODE; if ($code -ne 0) { ok "remove: unknown instance exits non-zero" } else { err "remove:ghost" "got exit $code" }
+$null = run config ghost 2>&1;         $code = $LASTEXITCODE; if ($code -ne 0) { ok "config: unknown instance exits non-zero" } else { err "config:ghost" "got exit $code" }
+$null = run token ghost 2>&1;          $code = $LASTEXITCODE; if ($code -ne 0) { ok "token: unknown instance exits non-zero" }  else { err "token:ghost"  "got exit $code" }
+$null = run clone ghost-src ghost-dst 2>&1; $code = $LASTEXITCODE; if ($code -ne 0) { ok "clone: unknown src exits non-zero" } else { err "clone:ghost-src" "got exit $code" }
+
+# ── spawn: launcher-missing branch ──────────────────────────────────────────────
+# Instance dir exists but the launcher was deleted -> spawn must refuse.
+Write-Host "`n=== spawn launcher-missing ==="
+run add launchergone *> $null
+Remove-Item "$env:CLAUDECTL_BIN\claude-launchergone.cmd" -Force -ErrorAction SilentlyContinue
+$null = run spawn launchergone --dry-run 2>&1; $code = $LASTEXITCODE
+if ($code -ne 0) { ok "spawn: missing launcher exits non-zero" } else { err "spawn:launcher-missing" "got exit $code" }
+
+# ── spawn: valid --project + --dry-run ──────────────────────────────────────────
+# Exercises the Push-Location branch (only the missing-dir path was tested before).
+Write-Host "`n=== spawn --project (valid) ==="
+$PROJDIR = Join-Path $TMPROOT "projdir"; New-Item -ItemType Directory -Path $PROJDIR -Force | Out-Null
+run add projinst *> $null
+$out = run spawn projinst --project "$PROJDIR" --dry-run 2>&1; $code = $LASTEXITCODE
+if ($code -eq 0 -and ($out -like "*claude-projinst*")) { ok "spawn --project (valid dir): dry-run prints launcher (exit 0)" } else { err "spawn:project-valid" "exit ${code}: $out" }
+
+# NOTE: the interactive confirm-abort case (reset/remove answering 'n') is bash-only.
+# PowerShell's Read-Host does not reliably consume redirected stdin across pwsh
+# versions, so asserting it here would be flaky. Invariant #5 covers CLI-command
+# parity, not test-for-test parity; the abort behaviour is verified in test_claudectl.sh.
+
+# ── dispatch aliases & no-arg default ───────────────────────────────────────────
+# ls->list, rm->remove, --version->version, --help/-h->help, bare invocation->help.
+Write-Host "`n=== dispatch aliases ==="
+$out = run ls
+if ($out -like "*vanilla*") { ok "alias: 'ls' dispatches to list" } else { err "alias:ls" "vanilla not in output" }
+run add rmalias *> $null
+run rm rmalias --force *> $null
+if (-not (Test-Path "$env:CLAUDECTL_BIN\claude-rmalias.cmd")) { ok "alias: 'rm' dispatches to remove" } else { err "alias:rm" "launcher still present" }
+$out = run --version
+if ($out -like "*claudectl*") { ok "alias: '--version' dispatches to version" } else { err "alias:--version" "missing" }
+$out = run --help
+if ($out -like "*usage:*") { ok "alias: '--help' dispatches to help" } else { err "alias:--help" "no usage banner" }
+$out = run -h
+if ($out -like "*usage:*") { ok "alias: '-h' dispatches to help" } else { err "alias:-h" "no usage banner" }
+$out = run
+if ($out -like "*usage:*") { ok "no-arg invocation defaults to help" } else { err "no-arg" "no usage banner" }
+
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 Remove-Item -Path $TMPROOT -Recurse -Force -ErrorAction SilentlyContinue
 $env:CLAUDECTL_BASE = $null
