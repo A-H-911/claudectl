@@ -29,6 +29,8 @@ After adding, run `claude-<name>` and complete `/login`. Each instance keeps its
 
 List all managed instances plus the built-in `vanilla` instance.
 
+**Alias:** `ls`
+
 **Flags:**
 - `--json` — output as JSON array
 
@@ -81,6 +83,8 @@ claudectl reset work --force
 
 Remove the launcher script for an instance.
 
+**Alias:** `rm`
+
 **Flags:**
 - `--purge` — also remove the config directory (irreversible)
 - `--force` — skip confirmation prompt
@@ -104,6 +108,10 @@ Launch Claude Code using a specific instance.
 - `--` — everything after `--` is passed directly to claude
 
 `--bare` skips hooks, LSP init, and plugin sync. Use for scripted calls.
+
+**Argument order:** `<name>` must come first. Any unrecognised token before `--` is rejected
+(`unknown spawn flag: …`, exit 1) rather than passed through — put extra claude arguments after `--`.
+This is enforced identically on bash and PowerShell.
 
 ```bash
 claudectl spawn work
