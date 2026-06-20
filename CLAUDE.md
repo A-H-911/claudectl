@@ -76,6 +76,19 @@ The test suite sets these automatically. Use them manually to avoid touching you
 `scripts/claudectl.cmd` is a pure pass-through to `.ps1` (`powershell -File ... %*`) — never edit
 it per-command.
 
+## Branching & CI
+
+`main` is a **protected branch — you cannot push to it directly.** Land every change via PR:
+
+1. Branch, commit, push.
+2. Open a PR (`gh pr create --fill`); CI runs the bash suite on Linux + macOS and the PowerShell
+   suite on Windows.
+3. Merge with **squash** or **rebase** once all three checks are green — linear history is enforced
+   (merge commits are rejected). 0 approvals are required, so you can self-merge.
+
+Force-pushes and branch deletion on `main` are blocked, and the rules apply to admins too. There is
+no direct-push escape hatch — even a one-line fix goes through a (fast, ~40s) PR.
+
 ## Invariants
 
 1. **Generic scripts**: Constants block at top only; functions have zero personal/org references
@@ -86,6 +99,7 @@ it per-command.
 6. **`spawn --dry-run`**: Always prints command; never executes — required for testability
 7. **`config` handles missing files**: Returns `{}` for empty instance; creates file on write
 8. **Name validation**: `^[a-zA-Z0-9][-a-zA-Z0-9_]*$` — spaces break Windows batch launchers
+9. **Self-update path pin**: never relocate `scripts/claudectl*` — `CLAUDECTL_UPDATE_URL` is pinned to that path; moving it breaks `setup --update` for existing installs (see Repository layout)
 
 ## Versioning
 
