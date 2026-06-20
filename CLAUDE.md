@@ -8,6 +8,13 @@ claudectl is a cross-platform terminal CLI (bash + PowerShell) for managing isol
 instances via `CLAUDE_CONFIG_DIR`. It is a standalone shell script — no build step, no dependencies
 beyond bash/python3/jq.
 
+## Repository layout
+
+Lightweight monorepo. Future tools go under `packages/<name>/` (see [packages/README.md](packages/README.md)).
+The `claudectl` CLI deliberately stays at the root — `scripts/claudectl*`, `setup.{sh,ps1}`, `tests/` —
+because its self-update URL (`CLAUDECTL_UPDATE_URL`) is pinned to `…/main/scripts/claudectl[.ps1]`;
+moving it would break `setup --update` for existing installs. Doc images live in `docs/assets/`.
+
 ## Architecture (the one mental model)
 
 `add <name>` creates two things: a config dir `$CLAUDECTL_BASE/<name>/` (chmod 700) and a launcher

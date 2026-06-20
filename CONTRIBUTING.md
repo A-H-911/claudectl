@@ -1,5 +1,12 @@
 # Contributing
 
+## Repository layout
+
+Lightweight monorepo: future tools live under `packages/<name>/` (see
+[packages/README.md](packages/README.md)). The `claudectl` CLI stays at the root
+(`scripts/`, `setup.{sh,ps1}`, `tests/`) so its path-pinned self-update URL keeps working.
+Doc images live in `docs/assets/`.
+
 ## Setup
 
 ```bash

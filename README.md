@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.svg" width="80" alt="claudectl logo">
+  <img src="docs/assets/logo.svg" width="80" alt="claudectl logo">
 </p>
 <h1 align="center">claudectl</h1>
 <p align="center">Manage isolated Claude Code instances — one binary, unlimited configurations.</p>
