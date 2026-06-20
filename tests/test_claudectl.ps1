@@ -37,6 +37,11 @@ if ($code -ne 0) { ok "add: duplicate exits non-zero (no --force)" } else { err 
 $null = run add "bad name" 2>&1; $code = $LASTEXITCODE
 if ($code -ne 0) { ok "add: invalid name exits non-zero" } else { err "add:invalid name" "got exit $code" }
 
+run add forcetest *> $null
+$null = run add forcetest --force 2>&1; $code = $LASTEXITCODE
+if ($code -eq 0) { ok "add --force: reinitialises existing instance (exit 0)" } else { err "add-force:exit" "got exit $code" }
+if (Test-Path "$env:CLAUDECTL_BIN\claude-forcetest.cmd") { ok "add --force: launcher present after reinit" } else { err "add-force:launcher" "missing" }
+
 # ── list ──────────────────────────────────────────────────────────────────────
 Write-Host "`n=== list ==="
 $out = run list
@@ -77,6 +82,9 @@ if (Test-Path "$env:CLAUDECTL_BASE\myinstance\settings.json") { ok "config write
 $val = run config myinstance model
 if ($val -eq "claude-opus-4-5") { ok "config read-back: correct value" } else { err "config:readback" "got '$val'" }
 
+$val = run config myinstance no_such_key; $code = $LASTEXITCODE
+if ($code -eq 0 -and [string]::IsNullOrWhiteSpace([string]$val)) { ok "config: absent key returns empty" } else { err "config:absent-key" "exit $code, got '$val'" }
+
 # ── clone ─────────────────────────────────────────────────────────────────────
 Write-Host "`n=== clone ==="
 $null = run clone myinstance nonexistent 2>&1; $code = $LASTEXITCODE
@@ -87,6 +95,25 @@ Set-Content "$env:CLAUDECTL_BASE\myinstance\.credentials.json" '{"oauthToken":"S
 run clone myinstance clonetest
 if (Test-Path "$env:CLAUDECTL_BASE\clonetest\settings.json")          { ok "clone: settings.json copied" }              else { err "clone:settings" "not copied" }
 if (-not (Test-Path "$env:CLAUDECTL_BASE\clonetest\.credentials.json")) { ok "clone: .credentials.json NOT copied"       } else { err "clone:credentials" "SECURITY VIOLATION: credentials copied!" }
+
+# clone --deep: copies non-denylisted files/dirs, excludes credentials + cache
+run add deepsrc; run add deepdst
+Set-Content "$env:CLAUDECTL_BASE\deepsrc\settings.json" '{"theme":"dark"}' -Encoding utf8
+New-Item -ItemType Directory "$env:CLAUDECTL_BASE\deepsrc\plugins" -Force | Out-Null
+Set-Content "$env:CLAUDECTL_BASE\deepsrc\plugins\p.txt" "x" -Encoding utf8
+New-Item -ItemType Directory "$env:CLAUDECTL_BASE\deepsrc\cache" -Force | Out-Null
+Set-Content "$env:CLAUDECTL_BASE\deepsrc\cache\c.bin" "x" -Encoding utf8
+Set-Content "$env:CLAUDECTL_BASE\deepsrc\.credentials.json" '{"oauthToken":"SECRET"}' -Encoding utf8
+run clone deepsrc deepdst --deep
+if (Test-Path "$env:CLAUDECTL_BASE\deepdst\settings.json")             { ok "clone --deep: settings.json copied" }      else { err "clone-deep:settings" "not copied" }
+if (Test-Path "$env:CLAUDECTL_BASE\deepdst\plugins\p.txt")            { ok "clone --deep: non-denylisted dir copied" } else { err "clone-deep:plugins" "not copied" }
+if (-not (Test-Path "$env:CLAUDECTL_BASE\deepdst\cache"))             { ok "clone --deep: cache/ excluded (denylist)" } else { err "clone-deep:cache" "cache copied" }
+if (-not (Test-Path "$env:CLAUDECTL_BASE\deepdst\.credentials.json")) { ok "clone --deep: .credentials.json excluded (security)" } else { err "clone-deep:credentials" "SECURITY VIOLATION: credentials deep-copied!" }
+
+# clone (shallow) when src has no settings.json: prints a 'nothing to clone' note, exits 0
+run add nosettings; run add nosettingsdst
+$out = run clone nosettings nosettingsdst 2>&1; $code = $LASTEXITCODE
+if ($code -eq 0 -and ($out -like "*nothing to clone*")) { ok "clone: no settings.json -> 'nothing to clone' note (exit 0)" } else { err "clone:no-settings" "exit ${code}: $out" }
 
 # ── spawn ─────────────────────────────────────────────────────────────────────
 Write-Host "`n=== spawn ==="
@@ -99,6 +126,9 @@ if ($code -ne 0) { ok "spawn: exits non-zero for missing instance" } else { err 
 
 $null = run spawn myinstance --project "C:\NoSuchDir" --dry-run 2>&1; $code = $LASTEXITCODE
 if ($code -ne 0) { ok "spawn --project: exits non-zero for missing dir" } else { err "spawn:missing-dir" "got exit $code" }
+
+$out = run spawn myinstance --dry-run -- --bare -p "hello" 2>&1
+if ($out -like "*--bare*") { ok "spawn --dry-run: passes through claude args after --" } else { err "spawn:passthrough" "args not in output: $out" }
 
 # ── status ────────────────────────────────────────────────────────────────────
 Write-Host "`n=== status ==="
@@ -159,6 +189,8 @@ foreach ($cmd in @("add","list","path","reset","remove","spawn","status","clone"
     $null = run help $cmd 2>&1; $code = $LASTEXITCODE
     if ($code -eq 0) { ok "help ${cmd}: exits 0" } else { err "help $cmd" "got exit $code" }
 }
+$null = run help no-such-subcommand 2>&1; $code = $LASTEXITCODE
+if ($code -ne 0) { ok "help: unknown subcommand exits non-zero" } else { err "help:unknown" "got exit $code" }
 
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 Remove-Item -Path $TMPROOT -Recurse -Force -ErrorAction SilentlyContinue

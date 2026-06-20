@@ -50,6 +50,12 @@ run add "bad name" 2>/dev/null; code=$?
 run add "-bad" 2>/dev/null; code=$?
 [ $code -eq 1 ]  && ok "add: invalid name (leading hyphen) exits 1" || err "add:leading-hyphen" "got exit $code"
 
+# add --force: reinitialise an existing instance (exit 0, launcher present)
+run add forcetest >/dev/null 2>&1
+run add forcetest --force >/dev/null 2>&1; code=$?
+[ $code -eq 0 ]  && ok "add --force: reinitialises existing instance (exit 0)" || err "add-force:exit" "got exit $code"
+[ -f "$CLAUDECTL_BIN/claude-forcetest" ] && ok "add --force: launcher present after reinit" || err "add-force:launcher" "missing"
+
 # ── list ──────────────────────────────────────────────────────────────────────
 printf "\n=== list ===\n"
 list_out=$(run list)
@@ -96,6 +102,11 @@ val=$(run config myinstance model)
 [ "$val" = "claude-opus-4-5" ] \
               && ok "config read-back: correct value"         || err "config:readback" "got '$val'"
 
+# config: reading a key that is absent returns empty (no error)
+val=$(run config myinstance no_such_key); code=$?
+{ [ $code -eq 0 ] && [ -z "$val" ]; } \
+              && ok "config: absent key returns empty"        || err "config:absent-key" "exit $code, got '$val'"
+
 # ── clone ─────────────────────────────────────────────────────────────────────
 printf "\n=== clone ===\n"
 run clone myinstance nonexistent 2>/dev/null; code=$?
@@ -109,6 +120,25 @@ run clone myinstance clonetest
 [ ! -f "$CLAUDECTL_BASE/clonetest/.credentials.json" ] \
               && ok "clone: .credentials.json NOT copied (security check)" \
               || err "clone:credentials" "SECURITY VIOLATION: credentials were copied!"
+
+# clone --deep: copies non-denylisted files/dirs, excludes credentials + cache
+run add deepsrc; run add deepdst
+printf '{"theme":"dark"}'        > "$CLAUDECTL_BASE/deepsrc/settings.json"
+mkdir -p "$CLAUDECTL_BASE/deepsrc/plugins"; printf 'x' > "$CLAUDECTL_BASE/deepsrc/plugins/p.txt"
+mkdir -p "$CLAUDECTL_BASE/deepsrc/cache";   printf 'x' > "$CLAUDECTL_BASE/deepsrc/cache/c.bin"
+printf '{"oauthToken":"SECRET"}' > "$CLAUDECTL_BASE/deepsrc/.credentials.json"
+run clone deepsrc deepdst --deep
+[ -f "$CLAUDECTL_BASE/deepdst/settings.json" ]       && ok "clone --deep: settings.json copied"      || err "clone-deep:settings" "not copied"
+[ -f "$CLAUDECTL_BASE/deepdst/plugins/p.txt" ]       && ok "clone --deep: non-denylisted dir copied" || err "clone-deep:plugins" "plugins/ not copied"
+[ ! -e "$CLAUDECTL_BASE/deepdst/cache" ]             && ok "clone --deep: cache/ excluded (denylist)" || err "clone-deep:cache" "cache/ copied"
+[ ! -f "$CLAUDECTL_BASE/deepdst/.credentials.json" ] && ok "clone --deep: .credentials.json excluded (security)" \
+              || err "clone-deep:credentials" "SECURITY VIOLATION: credentials were deep-copied!"
+
+# clone (shallow) when src has no settings.json: prints a 'nothing to clone' note, exits 0
+run add nosettings; run add nosettings-dst
+out=$(run clone nosettings nosettings-dst 2>&1); code=$?
+{ [ $code -eq 0 ] && echo "$out" | grep -qi "nothing to clone"; } \
+              && ok "clone: no settings.json -> 'nothing to clone' note (exit 0)" || err "clone:no-settings" "got exit $code: $out"
 
 # ── spawn ─────────────────────────────────────────────────────────────────────
 printf "\n=== spawn ===\n"
@@ -124,6 +154,11 @@ run spawn no-such-instance --dry-run 2>/dev/null; code=$?
 
 run spawn myinstance --project /no/such/dir --dry-run 2>/dev/null; code=$?
 [ $code -eq 1 ]  && ok "spawn --project: exits 1 for missing dir" || err "spawn:missing-dir" "got exit $code"
+
+# spawn: args after -- are passed through to claude (visible in --dry-run output)
+output=$(run spawn myinstance --dry-run -- --bare -p "hello" 2>&1)
+echo "$output" | grep -q -- "--bare" \
+              && ok "spawn --dry-run: passes through claude args after --" || err "spawn:passthrough" "args not in output: $output"
 
 # ── status ────────────────────────────────────────────────────────────────────
 printf "\n=== status ===\n"
@@ -217,6 +252,8 @@ printf "\n=== help ===\n"
 for cmd in add list path reset remove spawn status clone config token version setup; do
     run help "$cmd" >/dev/null 2>&1 && ok "help $cmd: exits 0" || err "help $cmd" "non-zero exit"
 done
+run help no-such-subcommand 2>/dev/null; code=$?
+[ $code -eq 1 ]  && ok "help: unknown subcommand exits 1" || err "help:unknown" "got exit $code"
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 printf "\n"
