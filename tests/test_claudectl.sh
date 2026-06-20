@@ -21,15 +21,25 @@ pass=0; fail=0
 ok()  { printf "  \033[32mPASS\033[0m %s\n" "$1"; pass=$((pass+1)); }
 err() { printf "  \033[31mFAIL\033[0m %s: %s\n" "$1" "$2"; fail=$((fail+1)); }
 run() { bash "$SCRIPT" "$@"; }
+skip() { printf "  \033[33mSKIP\033[0m %s\n" "$1"; }
 # Cross-platform permissions: avoids GNU stat -c%a vs BSD stat -f%Lp incompatibility
 get_perms() { python3 -c "import os,stat; print(oct(stat.S_IMODE(os.stat('$1').st_mode))[2:])"; }
+# Git Bash / MSYS on Windows emulates POSIX mode bits over NTFS (chmod 700 doesn't
+# round-trip) and routes python3 through a .cmd shim that mangles multi-line -c
+# scripts. Both make a couple of assertions spuriously red on Windows while passing
+# on the Linux/macOS CI runners. Detect MSYS/MinGW to skip *only* those two.
+is_gitbash() { case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) return 0;; *) return 1;; esac; }
 
 # ── add ───────────────────────────────────────────────────────────────────────
 printf "\n=== add ===\n"
 run add myinstance
 [ -d "$CLAUDECTL_BASE/myinstance" ]            && ok "add: config dir created"      || err "add:config dir" "missing"
-[ "$(get_perms "$CLAUDECTL_BASE/myinstance")" = "700" ] \
+if is_gitbash; then
+    skip "add: config dir chmod 700 (Git Bash emulates NTFS mode bits)"
+else
+    [ "$(get_perms "$CLAUDECTL_BASE/myinstance")" = "700" ] \
                                                && ok "add: config dir chmod 700"    || err "add:chmod" "wrong perms"
+fi
 [ -f "$CLAUDECTL_BIN/claude-myinstance" ]      && ok "add: launcher created"        || err "add:launcher" "missing"
 grep -q "CLAUDE_CONFIG_DIR" "$CLAUDECTL_BIN/claude-myinstance" \
                                                && ok "add: launcher sets CLAUDE_CONFIG_DIR" || err "add:env var" ""
@@ -63,6 +73,9 @@ echo "$list_out" | grep -q "myinstance" && ok "list: shows new instance"   || er
 echo "$list_out" | grep -q "vanilla"    && ok "list: always shows vanilla" || err "list:vanilla" "missing"
 
 # list --json: schema validation
+if is_gitbash; then
+    skip "list --json: schema (python3 .cmd shim mangles -c heredoc on Git Bash)"
+else
 run list --json | python3 -c "
 import json, sys
 data = json.load(sys.stdin)
@@ -77,6 +90,7 @@ assert 'config_dir' in inst, 'missing config_dir'
 assert isinstance(inst['logged_in'], bool), f'logged_in must be bool, got {type(inst[\"logged_in\"])}'
 print('ok')
 " && ok "list --json: schema correct (name, config_dir, logged_in:bool)" || err "list --json" "schema mismatch"
+fi
 
 # ── path ──────────────────────────────────────────────────────────────────────
 printf "\n=== path ===\n"
