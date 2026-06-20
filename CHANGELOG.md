@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.2.0] — 2026-06-20
+
+### Added
+
+- `claudectl setup` now wires PATH for **fish** (`~/.config/fish/config.fish`, `set -gx` syntax) in
+  addition to bash, zsh, and sh
+- Hermetic `setup` tests in `test_claudectl.sh` (PATH wiring, idempotency, non-fatal-when-Claude-absent),
+  isolated via `HOME` + `XDG_CONFIG_HOME` overrides
+
+### Changed
+
+- **PATH wiring is now a single implementation.** `setup.sh` and `setup.ps1` delegate to
+  `claudectl setup` instead of each carrying their own copy
+- `claudectl setup` wires PATH **before** checking for Claude Code, and only appends to shell rc files
+  that already exist (never creates rc files for unused shells)
+- Shell-agnostic activation hint ("reload your shell rc") replaces the bash-specific `source ~/.bashrc`
+
+### Fixed
+
+- `claudectl setup` no longer **exits 1** when Claude Code is absent — a missing binary is now an
+  informational note, so PATH setup succeeds independently of Claude Code installation
+  (behavior change; pre-1.0)
+
 ## [0.1.0] — 2026-06-19
 
 ### Added

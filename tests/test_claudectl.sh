@@ -155,6 +155,34 @@ echo "$output" | grep -q "claudectl" \
 echo "$output" | grep -qE "0\.[0-9]+\.[0-9]+" \
                         && ok "version: output contains semver"      || err "version:semver" "no version number"
 
+# ── setup ─────────────────────────────────────────────────────────────────────
+# Hermetic: HOME + XDG_CONFIG_HOME are redirected so real shell rc files are
+# never touched. Exercises PATH wiring across bash/zsh/sh/fish, idempotency, and
+# the non-fatal behaviour when Claude Code is absent.
+printf "\n=== setup ===\n"
+FAKEHOME="$TMPROOT/fakehome"
+mkdir -p "$FAKEHOME/.config/fish"
+: > "$FAKEHOME/.bashrc"; : > "$FAKEHOME/.zshrc"; : > "$FAKEHOME/.profile"; : > "$FAKEHOME/.config/fish/config.fish"
+
+HOME="$FAKEHOME" XDG_CONFIG_HOME="$FAKEHOME/.config" bash "$SCRIPT" setup >/dev/null 2>&1; code=$?
+[ $code -eq 0 ] && ok "setup: exits 0" || err "setup:exit" "got $code"
+grep -qF "$CLAUDECTL_BIN" "$FAKEHOME/.bashrc"  && ok "setup: wires bash PATH (.bashrc)"  || err "setup:bashrc"  "BIN not in .bashrc"
+grep -qF "$CLAUDECTL_BIN" "$FAKEHOME/.zshrc"   && ok "setup: wires zsh PATH (.zshrc)"    || err "setup:zshrc"   "BIN not in .zshrc"
+grep -qF "$CLAUDECTL_BIN" "$FAKEHOME/.profile" && ok "setup: wires sh PATH (.profile)"   || err "setup:profile" "BIN not in .profile"
+fish_cfg="$FAKEHOME/.config/fish/config.fish"
+grep -qE "^set -gx PATH" "$fish_cfg" && grep -qF "$CLAUDECTL_BIN" "$fish_cfg" \
+              && ok "setup: wires fish PATH (fish syntax)" || err "setup:fish" "fish PATH line missing or wrong syntax"
+
+# Idempotency: a second run must not duplicate the PATH entry
+HOME="$FAKEHOME" XDG_CONFIG_HOME="$FAKEHOME/.config" bash "$SCRIPT" setup >/dev/null 2>&1
+count=$(grep -cF "$CLAUDECTL_BIN" "$FAKEHOME/.bashrc")
+[ "$count" -eq 1 ] && ok "setup: idempotent (.bashrc not duplicated)" || err "setup:idempotent" "got $count entries"
+
+# Non-fatal when Claude Code is absent (CLAUDECTL_BIN points at a dir with no claude binary)
+NOCLAUDE="$TMPROOT/noclaude"; mkdir -p "$NOCLAUDE"
+HOME="$FAKEHOME" XDG_CONFIG_HOME="$FAKEHOME/.config" CLAUDECTL_BIN="$NOCLAUDE" bash "$SCRIPT" setup >/dev/null 2>&1; code=$?
+[ $code -eq 0 ] && ok "setup: non-fatal when Claude Code absent" || err "setup:noclaude" "got exit $code"
+
 # ── reset ─────────────────────────────────────────────────────────────────────
 printf "\n=== reset ===\n"
 printf '{"theme":"dark"}' > "$CLAUDECTL_BASE/myinstance/settings.json"

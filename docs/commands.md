@@ -180,7 +180,25 @@ Print claudectl version and Claude Code version.
 
 ## `claudectl setup [--update]`
 
-Verify installation and configure PATH.
+Configure PATH and verify installation.
+
+**Linux / macOS** — appends `$CLAUDECTL_BIN` to whichever shell rc files **already exist**:
+
+| Shell | File | Line written |
+|-------|------|--------------|
+| bash | `~/.bashrc` | `export PATH="$BIN:$PATH"` |
+| zsh | `~/.zshrc` | `export PATH="$BIN:$PATH"` |
+| sh | `~/.profile` | `export PATH="$BIN:$PATH"` |
+| fish | `${XDG_CONFIG_HOME:-~/.config}/fish/config.fish` | `set -gx PATH "$BIN" $PATH` |
+
+Existing entries are never duplicated; rc files that don't exist are left untouched (if none
+exist, setup prints a manual-PATH instruction). `setup.sh` delegates to this command, so the
+installer and the `setup` subcommand share one PATH-wiring implementation.
+
+**Windows** — adds `$CLAUDECTL_BIN` to the user PATH via the registry. Open a new terminal to pick it up.
+
+After wiring PATH, setup reports whether the Claude Code binary is present. A missing binary is a
+**note, not an error** — `setup` still exits 0 (changed in 0.2.0; previously exited 1).
 
 **Flags:**
 - `--update` — self-update claudectl from `$CLAUDECTL_UPDATE_URL`. Requires `curl`.

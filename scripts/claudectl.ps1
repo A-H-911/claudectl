@@ -2,7 +2,7 @@
 # claudectl.ps1 — manage isolated Claude Code instances (Windows PowerShell)
 # https://github.com/A-H-911/claudectl  ← update this when forking
 
-$VERSION = "0.1.0"
+$VERSION = "0.2.0"
 $CLAUDECTL_UPDATE_URL = if ($env:CLAUDECTL_UPDATE_URL) { $env:CLAUDECTL_UPDATE_URL } else { "https://raw.githubusercontent.com/A-H-911/claudectl/main/scripts/claudectl.ps1" }
 $BASE = if ($env:CLAUDECTL_BASE) { $env:CLAUDECTL_BASE } else { "$env:USERPROFILE\.claude-instances" }
 $BIN  = if ($env:CLAUDECTL_BIN)  { $env:CLAUDECTL_BIN  } else { "$env:USERPROFILE\.local\bin" }
@@ -332,16 +332,7 @@ function cmd_setup {
         return
     }
 
-    $claudeBin = "$BIN\claude.exe"
-    if (-not (Test-Path $claudeBin) -and -not (Get-Command claude -ErrorAction SilentlyContinue)) {
-        Write-Host "Claude Code is not installed."
-        Write-Host "Install it from: https://claude.ai/download"
-        Write-Host "Then re-run: claudectl setup"
-        exit 1
-    }
-    $found = if (Test-Path $claudeBin) { $claudeBin } else { (Get-Command claude).Source }
-    Write-Host "claude binary: $found"
-
+    # PATH wiring first — does not depend on Claude Code being installed.
     $userPath = [Environment]::GetEnvironmentVariable("PATH", "User")
     if ($userPath -notlike "*$BIN*") {
         Write-Host "adding $BIN to user PATH..."
@@ -349,6 +340,15 @@ function cmd_setup {
         Write-Host "done — open a new terminal to activate"
     } else {
         Write-Host "PATH already includes $BIN"
+    }
+
+    # Claude Code presence is informational (no longer a non-zero exit).
+    $claudeBin = "$BIN\claude.exe"
+    if ((Test-Path $claudeBin) -or (Get-Command claude -ErrorAction SilentlyContinue)) {
+        $found = if (Test-Path $claudeBin) { $claudeBin } else { (Get-Command claude).Source }
+        Write-Host "claude binary: $found"
+    } else {
+        Write-Host "note: Claude Code not found — install from https://claude.ai/download"
     }
 
     Write-Host ""
@@ -374,7 +374,7 @@ function cmd_help {
             "config"  { Write-Host "claudectl config <name> [<key> [<value>]]`nRead/write settings.json." }
             "token"   { Write-Host "claudectl token <name>`nShow credentials path and CI hint. Exits 1 if not logged in." }
             "version" { Write-Host "claudectl version`nPrint claudectl + claude versions." }
-            "setup"   { Write-Host "claudectl setup [--update]`nVerify install, configure PATH. --update: download latest." }
+            "setup"   { Write-Host "claudectl setup [--update]`nConfigure user PATH (registry) and verify install. Missing Claude Code is a note, not an error. --update: download latest." }
             default   { Die "unknown command '$sub'" }
         }
         return

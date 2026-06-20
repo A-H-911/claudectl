@@ -16,6 +16,14 @@ bash tests/test_claudectl.sh
 4. Add tests in both test files
 5. Document in `docs/commands.md`
 
+## Testing `setup`
+
+The bash suite tests `setup` hermetically by redirecting `HOME` + `XDG_CONFIG_HOME` to a temp dir, so
+real shell rc files are never touched. The **PowerShell** `setup` writes the user PATH via the Windows
+registry, which cannot be redirected the way `HOME` can — so the PS suite intentionally covers only
+`help setup` (not a live `setup` run) to keep tests from mutating the runner's environment. The shared
+PATH-wiring logic shape is covered by the hermetic bash test.
+
 ## PR checklist
 
 - [ ] `bash tests/test_claudectl.sh` passes

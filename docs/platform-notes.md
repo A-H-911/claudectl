@@ -59,6 +59,24 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 **PATH:** After `setup.ps1`, the user PATH is updated via the registry. Open a new terminal to
 pick it up — existing terminals won't see the change.
 
+## Shell Support (Linux / macOS)
+
+claudectl's scripts always run under **bash** (via the `#!/usr/bin/env bash` shebang), regardless of
+your interactive shell — so the only hard runtime requirement is that `bash` is installed. The launchers
+(`claude-<name>`) are bash too. No bash 4+ features are used, so macOS's stock `/bin/bash` 3.2 works.
+
+Your *interactive* shell matters only for `claudectl setup`, which wires `$CLAUDECTL_BIN` into PATH:
+
+| Shell | rc file edited | Syntax written |
+|-------|----------------|----------------|
+| bash | `~/.bashrc` | `export PATH="$BIN:$PATH"` |
+| zsh | `~/.zshrc` | `export PATH="$BIN:$PATH"` |
+| sh | `~/.profile` | `export PATH="$BIN:$PATH"` |
+| fish | `${XDG_CONFIG_HOME:-~/.config}/fish/config.fish` | `set -gx PATH "$BIN" $PATH` |
+
+setup only appends to rc files that **already exist** and never duplicates an entry. If you use a shell
+not listed here, add `$CLAUDECTL_BIN` to its PATH manually.
+
 ## SSH / Non-Interactive Sessions
 
 `~/.local/bin` is typically NOT in PATH for non-interactive SSH sessions.

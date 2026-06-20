@@ -8,6 +8,24 @@ claudectl is a cross-platform terminal CLI (bash + PowerShell) for managing isol
 instances via `CLAUDE_CONFIG_DIR`. It is a standalone shell script — no build step, no dependencies
 beyond bash/python3/jq.
 
+## Architecture (the one mental model)
+
+`add <name>` creates two things: a config dir `$CLAUDECTL_BASE/<name>/` (chmod 700) and a launcher
+`$CLAUDECTL_BIN/claude-<name>` that does `export CLAUDE_CONFIG_DIR=<dir>` then `exec`s the real
+`claude`. **The launcher is the entire isolation mechanism** — every instance is just a separate
+`CLAUDE_CONFIG_DIR`. `spawn` (and the launcher itself) are the only things that start Claude Code;
+all other commands (`list`, `clone`, `config`, `token`, `reset`, `remove`, `status`) only inspect
+or manipulate those config dirs.
+
+- `vanilla` is a virtual instance = `~/.claude` (default config). It cannot be reset or removed.
+- `status` attributes running PIDs to instances by reading `/proc/*/environ` on Linux/macOS;
+  Windows uses `Get-Process` and cannot do per-instance attribution.
+- PATH wiring lives in **one** place per platform: `configure_path()` in `scripts/claudectl`
+  (bash; covers bash/zsh/sh/fish, editing only rc files that already exist) and the PATH block in
+  `cmd_setup` (`scripts/claudectl.ps1`, registry). `setup.sh`/`setup.ps1` are thin installers that
+  copy the script and then **delegate** to `claudectl setup` — never duplicate the PATH logic there.
+  `setup` is non-fatal when Claude Code is absent (it wires PATH regardless, then notes the binary).
+
 ## Test commands
 
 ```bash
@@ -21,6 +39,13 @@ pwsh -File tests/test_claudectl.ps1
 bash scripts/claudectl help
 bash scripts/claudectl version
 ```
+
+The suites are **monolithic shell scripts** (no test framework, no `--filter`). To run one case,
+temporarily comment out the others or copy the block into a scratch script. Both suites are
+hermetic: they create a temp dir, point `CLAUDECTL_BASE`/`CLAUDECTL_BIN` at it, and install
+`tests/helpers/fake-claude` as a stub `claude` binary so `spawn`/`version` never invoke the real
+Claude Code. CI (`.github/workflows/ci.yml`) runs the bash suite on Linux + macOS and the
+PowerShell suite on Windows — keep all three green.
 
 ## Environment variables for testing
 
@@ -40,6 +65,9 @@ The test suite sets these automatically. Use them manually to avoid touching you
 4. Mirror in `scripts/claudectl.ps1`
 5. Add tests in `tests/test_claudectl.sh` and `tests/test_claudectl.ps1`
 6. Document in `docs/commands.md`
+
+`scripts/claudectl.cmd` is a pure pass-through to `.ps1` (`powershell -File ... %*`) — never edit
+it per-command.
 
 ## Invariants
 
