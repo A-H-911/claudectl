@@ -130,6 +130,9 @@ if ($code -ne 0) { ok "spawn --project: exits non-zero for missing dir" } else {
 $out = run spawn myinstance --dry-run -- --bare -p "hello" 2>&1
 if ($out -like "*--bare*") { ok "spawn --dry-run: passes through claude args after --" } else { err "spawn:passthrough" "args not in output: $out" }
 
+$null = run spawn myinstance --bogus-flag --dry-run 2>&1; $code = $LASTEXITCODE
+if ($code -ne 0) { ok "spawn: unknown flag exits non-zero" } else { err "spawn:unknown-flag" "got exit $code" }
+
 # ── status ────────────────────────────────────────────────────────────────────
 Write-Host "`n=== status ==="
 $null = run status; $code = $LASTEXITCODE

@@ -440,19 +440,20 @@ switch ($cmd) {
         cmd_remove -name "$name" -Purge:$purge -Force:$force
     }
     "spawn" {
+        # Matches bash: name is the first token; after it only --project/--dry-run/--
+        # are valid. Any other token (before --) is rejected, not passed through.
+        $name      = if ($rest.Count -gt 0) { $rest[0] } else { "" }
         $project   = ""
         $dryRun    = $false
-        $name      = ""
         $extraArgs = @()
         $seenDash  = $false
-        $i = 0
+        $i = 1
         while ($i -lt $rest.Count) {
-            if ($seenDash)               { $extraArgs += $rest[$i]; $i++ }
-            elseif ($rest[$i] -eq "--") { $seenDash = $true; $i++ }
+            if ($seenDash)                     { $extraArgs += $rest[$i]; $i++ }
+            elseif ($rest[$i] -eq "--")        { $seenDash = $true; $i++ }
             elseif ($rest[$i] -eq "--project") { $project = $rest[$i+1]; $i += 2 }
             elseif ($rest[$i] -eq "--dry-run") { $dryRun = $true; $i++ }
-            elseif (-not $name)         { $name = $rest[$i]; $i++ }
-            else                        { $extraArgs += $rest[$i]; $i++ }
+            else { Die "unknown spawn flag: $($rest[$i])" }
         }
         cmd_spawn -name "$name" -Project "$project" -DryRun:$dryRun -ClaudeArgs $extraArgs
     }

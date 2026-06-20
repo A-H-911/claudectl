@@ -160,6 +160,10 @@ output=$(run spawn myinstance --dry-run -- --bare -p "hello" 2>&1)
 echo "$output" | grep -q -- "--bare" \
               && ok "spawn --dry-run: passes through claude args after --" || err "spawn:passthrough" "args not in output: $output"
 
+# spawn: an unrecognised flag (before --) is rejected, not passed through
+run spawn myinstance --bogus-flag --dry-run 2>/dev/null; code=$?
+[ $code -eq 1 ]  && ok "spawn: unknown flag exits 1" || err "spawn:unknown-flag" "got exit $code"
+
 # ── status ────────────────────────────────────────────────────────────────────
 printf "\n=== status ===\n"
 run status; code=$?

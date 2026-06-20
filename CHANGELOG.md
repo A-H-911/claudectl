@@ -22,6 +22,8 @@
 - `claudectl setup` no longer **exits 1** when Claude Code is absent — a missing binary is now an
   informational note, so PATH setup succeeds independently of Claude Code installation
   (behavior change; pre-1.0)
+- `spawn` parity: PowerShell now **rejects an unknown flag** before `--` (`unknown spawn flag: …`,
+  non-zero exit) instead of silently passing it through to `claude`, matching the bash interface
 
 ## [0.1.0] — 2026-06-19
 
