@@ -26,12 +26,22 @@ cp scripts/claudectl ~/.local/bin/claudectl
 chmod +x ~/.local/bin/claudectl
 ```
 
-Add to `~/.bashrc` or `~/.zshrc`:
+Add to your shell's rc file:
+
 ```bash
+# bash (~/.bashrc), zsh (~/.zshrc), sh (~/.profile)
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Then: `source ~/.bashrc`
+```fish
+# fish (~/.config/fish/config.fish)
+set -gx PATH "$HOME/.local/bin" $PATH
+```
+
+Then open a new terminal, or reload your shell rc (e.g. `source ~/.bashrc`).
+
+> `bash setup.sh` (or `claudectl setup`) does all of this automatically for bash, zsh, sh, and fish —
+> it only edits rc files that already exist.
 
 ### Verify
 

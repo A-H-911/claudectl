@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="0.1.0"
+VERSION="0.2.0"
 CLAUDECTL_UPDATE_URL="${CLAUDECTL_UPDATE_URL:-https://raw.githubusercontent.com/A-H-911/claudectl/main/scripts/claudectl}"
 BASE="${CLAUDECTL_BASE:-$HOME/.claude-instances}"
 BIN="${CLAUDECTL_BIN:-$HOME/.local/bin}"
@@ -378,6 +378,46 @@ cmd_version() {
     fi
 }
 
+# ── configure_path ───────────────────────────────────────────────────────────
+# Single source of truth for PATH wiring (also used by setup.sh via delegation).
+# Appends to shell rc files that ALREADY exist — never creates rc files for shells
+# the user doesn't use. Covers POSIX shells (bash/zsh/sh) and fish (different
+# syntax + config path).
+
+configure_path() {
+    if echo "$PATH" | tr ':' '\n' | grep -qx "$BIN"; then
+        printf 'PATH already includes %s\n' "$BIN"
+        return 0
+    fi
+
+    local posix_line="export PATH=\"$BIN:\$PATH\""
+    local fish_line="set -gx PATH \"$BIN\" \$PATH"
+    local updated=0 rc
+
+    # POSIX-style shells: bash, zsh, sh
+    for rc in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile"; do
+        [ -f "$rc" ] || continue
+        grep -qF "$BIN" "$rc" && continue
+        printf '\n# added by claudectl\n%s\n' "$posix_line" >> "$rc"
+        printf 'added %s to PATH in %s\n' "$BIN" "$rc"
+        updated=1
+    done
+
+    # fish: different syntax, lives under XDG config
+    local fish_config="${XDG_CONFIG_HOME:-$HOME/.config}/fish/config.fish"
+    if [ -f "$fish_config" ] && ! grep -qF "$BIN" "$fish_config"; then
+        printf '\n# added by claudectl\n%s\n' "$fish_line" >> "$fish_config"
+        printf 'added %s to PATH in %s\n' "$BIN" "$fish_config"
+        updated=1
+    fi
+
+    if [ "$updated" -eq 1 ]; then
+        printf 'done — open a new terminal, or reload your shell rc, to activate\n'
+    else
+        printf 'no shell rc files found — add %s to your PATH manually\n' "$BIN"
+    fi
+}
+
 # ── cmd_setup ────────────────────────────────────────────────────────────────
 
 cmd_setup() {
@@ -399,24 +439,14 @@ cmd_setup() {
         return 0
     fi
 
-    local claude_bin="$BIN/claude"
-    if [ ! -f "$claude_bin" ] && ! command -v claude >/dev/null 2>&1; then
-        printf 'Claude Code is not installed.\n'
-        printf 'Install it from: https://claude.ai/download\n'
-        printf 'Then re-run: claudectl setup\n'
-        exit 1
-    fi
-    printf 'claude binary: %s\n' "$([ -f "$claude_bin" ] && echo "$claude_bin" || command -v claude)"
+    configure_path
 
-    if ! echo "$PATH" | tr ':' '\n' | grep -qx "$BIN"; then
-        printf 'adding %s to PATH in shell rc files...\n' "$BIN"
-        local line="export PATH=\"$BIN:\$PATH\""
-        for rc in "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile"; do
-            [ -f "$rc" ] && grep -qF "$BIN" "$rc" || printf '\n# added by claudectl\n%s\n' "$line" >> "$rc"
-        done
-        printf 'done — open a new terminal (or run: source ~/.bashrc) to activate\n'
+    # Claude Code presence is informational — PATH setup does not depend on it.
+    local claude_bin="$BIN/claude"
+    if [ -f "$claude_bin" ] || command -v claude >/dev/null 2>&1; then
+        printf 'claude binary: %s\n' "$([ -f "$claude_bin" ] && echo "$claude_bin" || command -v claude)"
     else
-        printf 'PATH already includes %s\n' "$BIN"
+        printf 'note: Claude Code not found — install from https://claude.ai/download\n'
     fi
 
     printf '\nclaudectl %s is ready\n' "$VERSION"
@@ -643,11 +673,17 @@ help_setup() {
     cat <<'HELP'
 claudectl setup [--update]
 
-Verify installation and configure PATH.
+Configure PATH and verify installation.
 
-  Checks that the Claude Code binary exists at $CLAUDECTL_BIN/claude.
-  If not found, prints the download URL and exits 1.
-  Adds $CLAUDECTL_BIN to PATH in ~/.bashrc, ~/.zshrc, and ~/.profile.
+  Adds $CLAUDECTL_BIN to PATH in whichever shell rc files already exist:
+    bash    ~/.bashrc
+    zsh     ~/.zshrc
+    sh      ~/.profile
+    fish    ${XDG_CONFIG_HOME:-~/.config}/fish/config.fish  (fish syntax)
+  Existing rc files are never duplicated; missing ones are left untouched.
+
+  Then reports whether the Claude Code binary is present at $CLAUDECTL_BIN/claude
+  (informational only — a missing binary no longer causes a non-zero exit).
 
   --update   self-update claudectl to the latest version from:
              $CLAUDECTL_UPDATE_URL
@@ -655,7 +691,7 @@ Verify installation and configure PATH.
              Note: not tested in CI (requires network + self-modification).
 
   Note: ~/.local/bin is often absent from non-interactive SSH sessions.
-  Open a new login shell or run 'source ~/.bashrc' after setup.
+  Open a new login shell, or reload your shell rc, after setup.
 
   Example:
     claudectl setup

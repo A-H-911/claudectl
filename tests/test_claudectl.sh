@@ -50,6 +50,12 @@ run add "bad name" 2>/dev/null; code=$?
 run add "-bad" 2>/dev/null; code=$?
 [ $code -eq 1 ]  && ok "add: invalid name (leading hyphen) exits 1" || err "add:leading-hyphen" "got exit $code"
 
+# add --force: reinitialise an existing instance (exit 0, launcher present)
+run add forcetest >/dev/null 2>&1
+run add forcetest --force >/dev/null 2>&1; code=$?
+[ $code -eq 0 ]  && ok "add --force: reinitialises existing instance (exit 0)" || err "add-force:exit" "got exit $code"
+[ -f "$CLAUDECTL_BIN/claude-forcetest" ] && ok "add --force: launcher present after reinit" || err "add-force:launcher" "missing"
+
 # ── list ──────────────────────────────────────────────────────────────────────
 printf "\n=== list ===\n"
 list_out=$(run list)
@@ -96,6 +102,11 @@ val=$(run config myinstance model)
 [ "$val" = "claude-opus-4-5" ] \
               && ok "config read-back: correct value"         || err "config:readback" "got '$val'"
 
+# config: reading a key that is absent returns empty (no error)
+val=$(run config myinstance no_such_key); code=$?
+{ [ $code -eq 0 ] && [ -z "$val" ]; } \
+              && ok "config: absent key returns empty"        || err "config:absent-key" "exit $code, got '$val'"
+
 # ── clone ─────────────────────────────────────────────────────────────────────
 printf "\n=== clone ===\n"
 run clone myinstance nonexistent 2>/dev/null; code=$?
@@ -109,6 +120,25 @@ run clone myinstance clonetest
 [ ! -f "$CLAUDECTL_BASE/clonetest/.credentials.json" ] \
               && ok "clone: .credentials.json NOT copied (security check)" \
               || err "clone:credentials" "SECURITY VIOLATION: credentials were copied!"
+
+# clone --deep: copies non-denylisted files/dirs, excludes credentials + cache
+run add deepsrc; run add deepdst
+printf '{"theme":"dark"}'        > "$CLAUDECTL_BASE/deepsrc/settings.json"
+mkdir -p "$CLAUDECTL_BASE/deepsrc/plugins"; printf 'x' > "$CLAUDECTL_BASE/deepsrc/plugins/p.txt"
+mkdir -p "$CLAUDECTL_BASE/deepsrc/cache";   printf 'x' > "$CLAUDECTL_BASE/deepsrc/cache/c.bin"
+printf '{"oauthToken":"SECRET"}' > "$CLAUDECTL_BASE/deepsrc/.credentials.json"
+run clone deepsrc deepdst --deep
+[ -f "$CLAUDECTL_BASE/deepdst/settings.json" ]       && ok "clone --deep: settings.json copied"      || err "clone-deep:settings" "not copied"
+[ -f "$CLAUDECTL_BASE/deepdst/plugins/p.txt" ]       && ok "clone --deep: non-denylisted dir copied" || err "clone-deep:plugins" "plugins/ not copied"
+[ ! -e "$CLAUDECTL_BASE/deepdst/cache" ]             && ok "clone --deep: cache/ excluded (denylist)" || err "clone-deep:cache" "cache/ copied"
+[ ! -f "$CLAUDECTL_BASE/deepdst/.credentials.json" ] && ok "clone --deep: .credentials.json excluded (security)" \
+              || err "clone-deep:credentials" "SECURITY VIOLATION: credentials were deep-copied!"
+
+# clone (shallow) when src has no settings.json: prints a 'nothing to clone' note, exits 0
+run add nosettings; run add nosettings-dst
+out=$(run clone nosettings nosettings-dst 2>&1); code=$?
+{ [ $code -eq 0 ] && echo "$out" | grep -qi "nothing to clone"; } \
+              && ok "clone: no settings.json -> 'nothing to clone' note (exit 0)" || err "clone:no-settings" "got exit $code: $out"
 
 # ── spawn ─────────────────────────────────────────────────────────────────────
 printf "\n=== spawn ===\n"
@@ -124,6 +154,15 @@ run spawn no-such-instance --dry-run 2>/dev/null; code=$?
 
 run spawn myinstance --project /no/such/dir --dry-run 2>/dev/null; code=$?
 [ $code -eq 1 ]  && ok "spawn --project: exits 1 for missing dir" || err "spawn:missing-dir" "got exit $code"
+
+# spawn: args after -- are passed through to claude (visible in --dry-run output)
+output=$(run spawn myinstance --dry-run -- --bare -p "hello" 2>&1)
+echo "$output" | grep -q -- "--bare" \
+              && ok "spawn --dry-run: passes through claude args after --" || err "spawn:passthrough" "args not in output: $output"
+
+# spawn: an unrecognised flag (before --) is rejected, not passed through
+run spawn myinstance --bogus-flag --dry-run 2>/dev/null; code=$?
+[ $code -eq 1 ]  && ok "spawn: unknown flag exits 1" || err "spawn:unknown-flag" "got exit $code"
 
 # ── status ────────────────────────────────────────────────────────────────────
 printf "\n=== status ===\n"
@@ -154,6 +193,34 @@ echo "$output" | grep -q "claudectl" \
                         && ok "version: output contains 'claudectl'" || err "version:output" "missing"
 echo "$output" | grep -qE "0\.[0-9]+\.[0-9]+" \
                         && ok "version: output contains semver"      || err "version:semver" "no version number"
+
+# ── setup ─────────────────────────────────────────────────────────────────────
+# Hermetic: HOME + XDG_CONFIG_HOME are redirected so real shell rc files are
+# never touched. Exercises PATH wiring across bash/zsh/sh/fish, idempotency, and
+# the non-fatal behaviour when Claude Code is absent.
+printf "\n=== setup ===\n"
+FAKEHOME="$TMPROOT/fakehome"
+mkdir -p "$FAKEHOME/.config/fish"
+: > "$FAKEHOME/.bashrc"; : > "$FAKEHOME/.zshrc"; : > "$FAKEHOME/.profile"; : > "$FAKEHOME/.config/fish/config.fish"
+
+HOME="$FAKEHOME" XDG_CONFIG_HOME="$FAKEHOME/.config" bash "$SCRIPT" setup >/dev/null 2>&1; code=$?
+[ $code -eq 0 ] && ok "setup: exits 0" || err "setup:exit" "got $code"
+grep -qF "$CLAUDECTL_BIN" "$FAKEHOME/.bashrc"  && ok "setup: wires bash PATH (.bashrc)"  || err "setup:bashrc"  "BIN not in .bashrc"
+grep -qF "$CLAUDECTL_BIN" "$FAKEHOME/.zshrc"   && ok "setup: wires zsh PATH (.zshrc)"    || err "setup:zshrc"   "BIN not in .zshrc"
+grep -qF "$CLAUDECTL_BIN" "$FAKEHOME/.profile" && ok "setup: wires sh PATH (.profile)"   || err "setup:profile" "BIN not in .profile"
+fish_cfg="$FAKEHOME/.config/fish/config.fish"
+grep -qE "^set -gx PATH" "$fish_cfg" && grep -qF "$CLAUDECTL_BIN" "$fish_cfg" \
+              && ok "setup: wires fish PATH (fish syntax)" || err "setup:fish" "fish PATH line missing or wrong syntax"
+
+# Idempotency: a second run must not duplicate the PATH entry
+HOME="$FAKEHOME" XDG_CONFIG_HOME="$FAKEHOME/.config" bash "$SCRIPT" setup >/dev/null 2>&1
+count=$(grep -cF "$CLAUDECTL_BIN" "$FAKEHOME/.bashrc")
+[ "$count" -eq 1 ] && ok "setup: idempotent (.bashrc not duplicated)" || err "setup:idempotent" "got $count entries"
+
+# Non-fatal when Claude Code is absent (CLAUDECTL_BIN points at a dir with no claude binary)
+NOCLAUDE="$TMPROOT/noclaude"; mkdir -p "$NOCLAUDE"
+HOME="$FAKEHOME" XDG_CONFIG_HOME="$FAKEHOME/.config" CLAUDECTL_BIN="$NOCLAUDE" bash "$SCRIPT" setup >/dev/null 2>&1; code=$?
+[ $code -eq 0 ] && ok "setup: non-fatal when Claude Code absent" || err "setup:noclaude" "got exit $code"
 
 # ── reset ─────────────────────────────────────────────────────────────────────
 printf "\n=== reset ===\n"
@@ -189,6 +256,8 @@ printf "\n=== help ===\n"
 for cmd in add list path reset remove spawn status clone config token version setup; do
     run help "$cmd" >/dev/null 2>&1 && ok "help $cmd: exits 0" || err "help $cmd" "non-zero exit"
 done
+run help no-such-subcommand 2>/dev/null; code=$?
+[ $code -eq 1 ]  && ok "help: unknown subcommand exits 1" || err "help:unknown" "got exit $code"
 
 # ── Summary ───────────────────────────────────────────────────────────────────
 printf "\n"

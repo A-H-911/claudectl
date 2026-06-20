@@ -9,7 +9,7 @@
   </a>
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT">
   <img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey" alt="Platform">
-  <img src="https://img.shields.io/badge/version-0.1.0-green" alt="v0.1.0">
+  <img src="https://img.shields.io/badge/version-0.2.0-green" alt="v0.2.0">
 </p>
 
 ---
@@ -195,7 +195,9 @@ See [docs/user-guide.md](docs/user-guide.md) for complete workflows.
 | macOS | Supported | `status` not available (no `/proc`) |
 | Windows | Supported | Launchers are `.cmd` files; `status` shows PID+time only |
 
-See [docs/platform-notes.md](docs/platform-notes.md) for per-platform details.
+**Shells:** the scripts run under bash (any interactive shell works, as long as `bash` is installed).
+`claudectl setup` wires PATH for **bash, zsh, sh, and fish**. See
+[docs/platform-notes.md](docs/platform-notes.md) for per-platform details.
 
 ---
 
