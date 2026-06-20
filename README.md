@@ -237,6 +237,7 @@ Each new instance starts unauthenticated. Run `claude-<name>` and complete `/log
 
 ## Contributing
 
+`main` is protected: changes land via pull request and must pass CI on Linux, macOS, and Windows.
 See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License

@@ -8,6 +8,27 @@ cd claudectl
 bash tests/test_claudectl.sh
 ```
 
+## Branching & merging
+
+`main` is a **protected branch** — every change lands via pull request, maintainers included:
+
+- **No direct pushes** to `main`; force-pushes and branch deletion are blocked.
+- **CI must pass** on all three jobs before merge: `Test (Linux)`, `Test (macOS)`, `Test (Windows)`.
+- The branch must be **up to date** with `main` before merging.
+- **Linear history** is enforced — merge with **squash** or **rebase** (no merge commits).
+- Reviews are not required, so you can self-merge once CI is green.
+
+Typical flow:
+
+```bash
+git checkout -b feat/my-change
+bash tests/test_claudectl.sh          # verify locally
+pwsh -File tests/test_claudectl.ps1
+git push -u origin feat/my-change
+gh pr create --fill                   # CI runs on all 3 platforms
+gh pr merge --squash --delete-branch  # after CI is green
+```
+
 ## Adding a command
 
 1. `cmd_<name>()` + `help_<name>()` in `scripts/claudectl`
@@ -28,6 +49,7 @@ PATH-wiring logic shape is covered by the hermetic bash test.
 
 - [ ] `bash tests/test_claudectl.sh` passes
 - [ ] `pwsh -File tests/test_claudectl.ps1` passes
+- [ ] CI green on Linux, macOS, and Windows (enforced by branch protection before merge)
 - [ ] No personal/org references inside functions (constants block only)
 - [ ] `.credentials.json` denylist in `clone` unchanged
 - [ ] Launcher template uses expanded `$BIN` (heredoc `<<EOF` not `<<'EOF'`)
