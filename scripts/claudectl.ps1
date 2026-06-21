@@ -2,7 +2,7 @@
 # claudectl.ps1 - manage isolated Claude Code instances (Windows PowerShell)
 # https://github.com/A-H-911/claudectl  <- update this when forking
 
-$VERSION = "0.2.2"
+$VERSION = "0.2.3"
 $CLAUDECTL_UPDATE_URL = if ($env:CLAUDECTL_UPDATE_URL) { $env:CLAUDECTL_UPDATE_URL } else { "https://raw.githubusercontent.com/A-H-911/claudectl/main/scripts/claudectl.ps1" }
 $BASE = if ($env:CLAUDECTL_BASE) { $env:CLAUDECTL_BASE } else { "$env:USERPROFILE\.claude-instances" }
 $BIN  = if ($env:CLAUDECTL_BIN)  { $env:CLAUDECTL_BIN  } else { "$env:USERPROFILE\.local\bin" }

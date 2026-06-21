@@ -39,13 +39,24 @@ or manipulate those config dirs.
 # Run bash integration tests (safe — uses temp dir, never touches real ~/.claude-instances)
 bash tests/test_claudectl.sh
 
-# Run PowerShell integration tests (Windows)
-pwsh -File tests/test_claudectl.ps1
+# Run PowerShell integration tests (Windows) — under BOTH 5.1 and pwsh 7:
+powershell -File tests/test_claudectl.ps1   # Windows PowerShell 5.1 (production claudectl.cmd path)
+pwsh       -File tests/test_claudectl.ps1   # pwsh 7
+
+# Real-machine end-to-end smoke (sandboxed; safe over SSH)
+bash       tests/smoke.sh                    # Linux/macOS
+powershell -File tests/smoke.ps1             # Windows
 
 # Smoke test the bash CLI
 bash scripts/claudectl help
 bash scripts/claudectl version
 ```
+
+**Real-machine test plan (run on every change):** the hermetic suites don't cover real-OS behavior —
+Linux `/proc` attribution, macOS bash 3.2 / BSD utils, and Windows PowerShell 5.1 (the production
+`claudectl.cmd` path). `tests/real-machine-test.ps1` runs the full matrix (both suites + smoke, both
+PowerShell versions on Windows) on real Linux, macOS, and Windows hosts over SSH. See
+[docs/real-machine-testing.md](docs/real-machine-testing.md).
 
 The suites are **monolithic shell scripts** (no test framework, no `--filter`). To run one case,
 temporarily comment out the others or copy the block into a scratch script. Both suites are

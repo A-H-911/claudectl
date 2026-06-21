@@ -1,0 +1,3 @@
+# Real-machine test config: contains host/IP/1Password-item specifics for the
+# operator's environment. Keep it out of the (generic, forkable) repo.
+tests/real-machine-hosts.json

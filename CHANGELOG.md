@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.2.3] — 2026-06-21
+
+### Added
+
+- **Real-machine test plan** — `tests/real-machine-test.ps1`, a generic, config-driven orchestrator
+  that runs the full matrix (both unit suites + smoke; on Windows, **both** PowerShell 5.1 and pwsh 7)
+  across real Linux, macOS, and Windows hosts over SSH. Credentials come from 1Password (read-only)
+  into in-memory SecureStrings — never logged. Host specifics live in a gitignored
+  `tests/real-machine-hosts.json` (template: `tests/real-machine-hosts.example.json`). See
+  [docs/real-machine-testing.md](docs/real-machine-testing.md).
+- `smoke.sh` now asserts **live `status` attribution** — a running `CLAUDE_CONFIG_DIR` process is
+  tied to its instance via `/proc` on Linux, and the `/proc`-absent clean path is checked on macOS.
+
+### Changed
+
+- **The PowerShell unit suite now runs under both 5.1 and pwsh 7.** `test_claudectl.ps1` drives
+  `claudectl.ps1` via the *same* interpreter that launches the suite (`$PSExe`), so
+  `powershell -File ...` exercises 5.1 (the production `claudectl.cmd` path) and `pwsh -File ...`
+  exercises 7. CI now runs the suite under both on `windows-latest`.
+
 ## [0.2.2] — 2026-06-21
 
 ### Fixed
