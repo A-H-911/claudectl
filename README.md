@@ -37,6 +37,16 @@ No copying, no duplication, no daemon.
 
 ## How it works
 
+<p align="center">
+  <img src="docs/assets/how-it-works.svg" width="880" alt="claudectl creates a launcher and an isolated config directory per instance; each launcher sets CLAUDE_CONFIG_DIR and execs the single shared claude binary, which then reads only that instance's config.">
+</p>
+
+`claudectl add <name>` creates **two things**: an isolated **config directory** (`chmod 700`) and a
+thin **launcher** `claude-<name>`. The launcher *is* the entire isolation mechanism — it exports
+`CLAUDE_CONFIG_DIR` pointing at that instance's directory, then `exec`s the **one shared `claude`
+binary**, which therefore reads only that instance's credentials, settings, and history. `vanilla`
+is the built-in default (`~/.claude`), used when you run `claude` directly. No copying, no daemon.
+
 ```
 claudectl add work
 # creates ~/.claude-instances/work/       (config dir, chmod 700)

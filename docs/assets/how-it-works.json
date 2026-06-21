@@ -1,0 +1,33 @@
+{
+  "specVersion": "1.0",
+  "diagramType": "architecture",
+  "direction": "LR",
+  "meta": { "title": "How claudectl works: one shared binary, isolated configs" },
+  "styles": {
+    "user":     { "fill": "#FFFFFF", "border": { "color": "#555555" } },
+    "tool":     { "fill": "#EDE7F6", "border": { "color": "#5E35B1" } },
+    "launcher": { "fill": "#FFF3E0", "border": { "color": "#EF6C00" } },
+    "shared":   { "fill": "#E8F5E9", "border": { "color": "#2E7D32" } },
+    "store":    { "fill": "#E8F0FF", "border": { "color": "#1976D2" } }
+  },
+  "nodes": [
+    { "id": "you", "shape": "rect",     "styleRefs": ["user"],     "label": { "text": "You (terminal)" } },
+    { "id": "cli", "shape": "rect",     "styleRefs": ["tool"],     "label": { "text": "claudectl  (add | list | spawn | clone | token | ...)" } },
+    { "id": "lw",  "shape": "rect",     "styleRefs": ["launcher"], "label": { "text": "claude-work  (launcher)" } },
+    { "id": "lp",  "shape": "rect",     "styleRefs": ["launcher"], "label": { "text": "claude-personal  (launcher)" } },
+    { "id": "bin", "shape": "rect",     "styleRefs": ["shared"],   "label": { "text": "claude  (one shared binary)" } },
+    { "id": "dw",  "shape": "cylinder", "styleRefs": ["store"],    "label": { "text": "~/.claude-instances/work" } },
+    { "id": "dp",  "shape": "cylinder", "styleRefs": ["store"],    "label": { "text": "~/.claude-instances/personal" } },
+    { "id": "dv",  "shape": "cylinder", "styleRefs": ["store"],    "label": { "text": "~/.claude  (vanilla default)" } }
+  ],
+  "edges": [
+    { "id": "e_run", "source": "you", "target": "cli" },
+    { "id": "e_aw",  "source": "cli", "target": "lw",  "label": { "text": "add work" } },
+    { "id": "e_ap",  "source": "cli", "target": "lp",  "label": { "text": "add personal" } },
+    { "id": "e_xw",  "source": "lw",  "target": "bin", "label": { "text": "exec" } },
+    { "id": "e_xp",  "source": "lp",  "target": "bin", "label": { "text": "exec" } },
+    { "id": "e_rw",  "source": "bin", "target": "dw",  "label": { "text": "reads" } },
+    { "id": "e_rp",  "source": "bin", "target": "dp",  "label": { "text": "reads" } },
+    { "id": "e_rv",  "source": "bin", "target": "dv",  "label": { "text": "default" } }
+  ]
+}
