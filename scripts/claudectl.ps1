@@ -1,13 +1,13 @@
 #!/usr/bin/env pwsh
-# claudectl.ps1 — manage isolated Claude Code instances (Windows PowerShell)
-# https://github.com/A-H-911/claudectl  ← update this when forking
+# claudectl.ps1 - manage isolated Claude Code instances (Windows PowerShell)
+# https://github.com/A-H-911/claudectl  <- update this when forking
 
-$VERSION = "0.2.1"
+$VERSION = "0.2.2"
 $CLAUDECTL_UPDATE_URL = if ($env:CLAUDECTL_UPDATE_URL) { $env:CLAUDECTL_UPDATE_URL } else { "https://raw.githubusercontent.com/A-H-911/claudectl/main/scripts/claudectl.ps1" }
 $BASE = if ($env:CLAUDECTL_BASE) { $env:CLAUDECTL_BASE } else { "$env:USERPROFILE\.claude-instances" }
 $BIN  = if ($env:CLAUDECTL_BIN)  { $env:CLAUDECTL_BIN  } else { "$env:USERPROFILE\.local\bin" }
 
-# ── Utilities ────────────────────────────────────────────────────────────────
+# -- Utilities ----------------------------------------------------------------
 
 function Die {
     param([string]$msg)
@@ -26,18 +26,18 @@ function Assert-Instance {
     param([string]$name)
     if ($name -eq "vanilla") { return }
     if (-not (Test-Path "$BASE\$name" -PathType Container)) {
-        Die "instance '$name' not found — run 'claudectl list' to see available instances"
+        Die "instance '$name' not found - run 'claudectl list' to see available instances"
     }
 }
 
 function Test-ValidName {
     param([string]$name)
     if ($name -notmatch '^[a-zA-Z0-9][-a-zA-Z0-9_]*$') {
-        Die "invalid name '$name' — use letters, numbers, hyphens, underscores only (no spaces)"
+        Die "invalid name '$name' - use letters, numbers, hyphens, underscores only (no spaces)"
     }
 }
 
-# ── cmd_add ──────────────────────────────────────────────────────────────────
+# -- cmd_add ------------------------------------------------------------------
 
 function cmd_add {
     param([string]$name = "", [switch]$Force)
@@ -47,13 +47,13 @@ function cmd_add {
     $launcher = "$BIN\claude-$name.cmd"
 
     if ((Test-Path $dir -PathType Container) -and (-not $Force)) {
-        Die "instance '$name' already exists — use --force to reinitialise"
+        Die "instance '$name' already exists - use --force to reinitialise"
     }
 
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
     icacls $dir /inheritance:d /grant:r "${env:USERNAME}:(OI)(CI)F" 2>$null | Out-Null
 
-    # Launcher expands $dir and $BIN at creation time — CLAUDECTL_BIN override works in tests
+    # Launcher expands $dir and $BIN at creation time - CLAUDECTL_BIN override works in tests
     $launcherContent = "@echo off`r`nsetlocal`r`nset CLAUDE_CONFIG_DIR=$dir`r`n`"$BIN\claude.exe`" %*"
     Set-Content -Path $launcher -Value $launcherContent -Encoding ascii
 
@@ -63,7 +63,7 @@ function cmd_add {
     Write-Host "  next    : run ``claude-$name``, then complete /login"
 }
 
-# ── cmd_list ─────────────────────────────────────────────────────────────────
+# -- cmd_list -----------------------------------------------------------------
 
 function cmd_list {
     param([switch]$Json)
@@ -102,7 +102,7 @@ function cmd_list {
     }
 }
 
-# ── cmd_path ─────────────────────────────────────────────────────────────────
+# -- cmd_path -----------------------------------------------------------------
 
 function cmd_path {
     param([string]$name = "")
@@ -115,7 +115,7 @@ function cmd_path {
     }
 }
 
-# ── cmd_reset ────────────────────────────────────────────────────────────────
+# -- cmd_reset ----------------------------------------------------------------
 
 function cmd_reset {
     param([string]$name = "", [switch]$Force)
@@ -127,10 +127,10 @@ function cmd_reset {
     Remove-Item -Path $dir -Recurse -Force
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
     icacls $dir /inheritance:d /grant:r "${env:USERNAME}:(OI)(CI)F" 2>$null | Out-Null
-    Write-Host "reset instance `"$name`" — config dir wiped, launcher kept"
+    Write-Host "reset instance `"$name`" - config dir wiped, launcher kept"
 }
 
-# ── cmd_remove ───────────────────────────────────────────────────────────────
+# -- cmd_remove ---------------------------------------------------------------
 
 function cmd_remove {
     param([string]$name = "", [switch]$Purge, [switch]$Force)
@@ -153,14 +153,14 @@ function cmd_remove {
     }
 }
 
-# ── cmd_spawn ────────────────────────────────────────────────────────────────
+# -- cmd_spawn ----------------------------------------------------------------
 
 function cmd_spawn {
     param([string]$name = "", [string]$Project = "", [switch]$DryRun, [string[]]$ClaudeArgs = @())
     if (-not $name) { Die "usage: claudectl spawn <name> [--project <dir>] [--dry-run] [-- <claude-args>...]" }
     Assert-Instance $name
     $launcher = "$BIN\claude-$name.cmd"
-    if (-not (Test-Path $launcher)) { Die "launcher '$launcher' not found — run 'claudectl add $name' again" }
+    if (-not (Test-Path $launcher)) { Die "launcher '$launcher' not found - run 'claudectl add $name' again" }
 
     if ($Project) {
         if (-not (Test-Path $Project -PathType Container)) { Die "project directory '$Project' not found" }
@@ -187,7 +187,7 @@ function cmd_spawn {
     exit $code
 }
 
-# ── cmd_status ───────────────────────────────────────────────────────────────
+# -- cmd_status ---------------------------------------------------------------
 
 function cmd_status {
     param([switch]$Json)
@@ -214,7 +214,7 @@ function cmd_status {
     }
 }
 
-# ── cmd_clone ────────────────────────────────────────────────────────────────
+# -- cmd_clone ----------------------------------------------------------------
 
 function cmd_clone {
     param([string]$src = "", [string]$dst = "", [switch]$Deep)
@@ -225,7 +225,7 @@ function cmd_clone {
     $srcDir = if ($src -eq "vanilla") { "$env:USERPROFILE\.claude" } else { "$BASE\$src" }
     $dstDir = if ($dst -eq "vanilla") { "$env:USERPROFILE\.claude" } else { "$BASE\$dst" }
 
-    # These are NEVER copied — auth tokens and auto-generated state
+    # These are NEVER copied - auth tokens and auto-generated state
     $denylist = @(".credentials.json","cache","backups","sessions","history.jsonl","telemetry","usage-data","mcp-needs-auth-cache.json")
 
     if ($Deep) {
@@ -239,12 +239,12 @@ function cmd_clone {
             Copy-Item $settingsFile "$dstDir\settings.json" -Force
             Write-Host "cloned settings.json from `"$src`" -> `"$dst`""
         } else {
-            Write-Host "note: `"$src`" has no settings.json yet — nothing to clone"
+            Write-Host "note: `"$src`" has no settings.json yet - nothing to clone"
         }
     }
 }
 
-# ── cmd_config ───────────────────────────────────────────────────────────────
+# -- cmd_config ---------------------------------------------------------------
 
 function cmd_config {
     param([string]$name = "", [string]$key = "", [string]$val = "")
@@ -280,7 +280,7 @@ function cmd_config {
     Write-Host "set $key = $val in `"$name`""
 }
 
-# ── cmd_token ────────────────────────────────────────────────────────────────
+# -- cmd_token ----------------------------------------------------------------
 
 function cmd_token {
     param([string]$name = "")
@@ -299,7 +299,7 @@ function cmd_token {
     Write-Host "CI usage:    `$env:CLAUDE_CODE_OAUTH_TOKEN = (Get-Content '$creds' | ConvertFrom-Json).oauthToken"
 }
 
-# ── cmd_version ──────────────────────────────────────────────────────────────
+# -- cmd_version --------------------------------------------------------------
 
 function cmd_version {
     Write-Host "claudectl $VERSION"
@@ -311,7 +311,7 @@ function cmd_version {
     }
 }
 
-# ── cmd_setup ────────────────────────────────────────────────────────────────
+# -- cmd_setup ----------------------------------------------------------------
 
 function cmd_setup {
     param([switch]$Update)
@@ -332,12 +332,12 @@ function cmd_setup {
         return
     }
 
-    # PATH wiring first — does not depend on Claude Code being installed.
+    # PATH wiring first - does not depend on Claude Code being installed.
     $userPath = [Environment]::GetEnvironmentVariable("PATH", "User")
     if ($userPath -notlike "*$BIN*") {
         Write-Host "adding $BIN to user PATH..."
         [Environment]::SetEnvironmentVariable("PATH", "$BIN;$userPath", "User")
-        Write-Host "done — open a new terminal to activate"
+        Write-Host "done - open a new terminal to activate"
     } else {
         Write-Host "PATH already includes $BIN"
     }
@@ -348,7 +348,7 @@ function cmd_setup {
         $found = if (Test-Path $claudeBin) { $claudeBin } else { (Get-Command claude).Source }
         Write-Host "claude binary: $found"
     } else {
-        Write-Host "note: Claude Code not found — install from https://claude.ai/download"
+        Write-Host "note: Claude Code not found - install from https://claude.ai/download"
     }
 
     Write-Host ""
@@ -357,7 +357,7 @@ function cmd_setup {
     Write-Host "  Set-ExecutionPolicy -Scope CurrentUser RemoteSigned"
 }
 
-# ── Help ─────────────────────────────────────────────────────────────────────
+# -- Help ---------------------------------------------------------------------
 
 function cmd_help {
     param([string]$sub = "")
@@ -380,7 +380,7 @@ function cmd_help {
         return
     }
     Write-Host @"
-claudectl $VERSION — manage isolated Claude Code instances
+claudectl $VERSION - manage isolated Claude Code instances
 
 usage: claudectl <command> [options]
 
@@ -407,9 +407,9 @@ environment:
 "@
 }
 
-# ── Dispatch ─────────────────────────────────────────────────────────────────
+# -- Dispatch -----------------------------------------------------------------
 
-# Cast $args to a typed string array first — slicing a string[] always
+# Cast $args to a typed string array first - slicing a string[] always
 # returns a string[], preventing single-element ranges from unboxing to scalar.
 [string[]]$_argv = @($args | ForEach-Object { [string]$_ })
 $cmd  = if ($_argv.Count -gt 0) { $_argv[0] } else { "help" }

@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.2.2] — 2026-06-21
+
+### Fixed
+
+- **Windows: `claudectl` failed to run under Windows PowerShell 5.1** — the production entry point
+  (`claudectl.cmd`) invokes `claudectl.ps1` via `powershell` (5.1), which reads a BOM-less `.ps1` as
+  Windows-1252; the non-ASCII em-dashes inside `Write-Host`/`Die` strings then broke parsing entirely
+  (`MissingEndCurlyBrace`). CI never caught it because it only ran `pwsh` (7). `claudectl.ps1` is now
+  pure ASCII, so it parses identically under PowerShell 5.1 and 7. Found via real-machine testing.
+
+### Added
+
+- **Real-machine smoke harness** `tests/smoke.{sh,ps1}` — a non-hermetic, real-`claude`-aware
+  full-lifecycle check (still sandboxed via `CLAUDECTL_BASE`/`CLAUDECTL_BIN`), safe to run over SSH.
+  Includes a security assertion that `token` never prints the credential value.
+- **CI now exercises the Windows 5.1 production path** — a `windows-latest` step parse-checks
+  `claudectl.ps1` and runs `smoke.ps1` under `powershell` (5.1), guarding the regression above.
+
+### Changed
+
+- The bash suite (`tests/test_claudectl.sh`) skips the `chmod 700` and `python3` JSON-schema
+  assertions under Git Bash/MSYS (where they are spuriously red), keeping them on Linux/macOS CI.
+
 ## [0.2.1] — 2026-06-20
 
 ### Added

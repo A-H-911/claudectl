@@ -4,7 +4,7 @@
 
 set -euo pipefail
 
-VERSION="0.2.1"
+VERSION="0.2.2"
 CLAUDECTL_UPDATE_URL="${CLAUDECTL_UPDATE_URL:-https://raw.githubusercontent.com/A-H-911/claudectl/main/scripts/claudectl}"
 BASE="${CLAUDECTL_BASE:-$HOME/.claude-instances}"
 BIN="${CLAUDECTL_BIN:-$HOME/.local/bin}"
