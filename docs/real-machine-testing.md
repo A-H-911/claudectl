@@ -25,6 +25,31 @@ CI historically used 7. Each unit suite is driven by the **same** interpreter th
 launches it (see `$PSExe` in `test_claudectl.ps1`), so `powershell -File ...` tests 5.1
 and `pwsh -File ...` tests 7.
 
+## Test artifacts: per-target suites vs. the driver
+
+The test tooling comes in two kinds, which is why most files have a `.sh`/`.ps1` pair
+but `real-machine-test.ps1` does not:
+
+- **Per-target artifacts run *on* the machine under test**, so each needs a native
+  version per platform:
+  - `claudectl` / `claudectl.ps1` — the CLI itself
+  - `tests/test_claudectl.sh` / `.ps1` — the hermetic unit suites
+  - `tests/smoke.sh` / `.ps1` — the lifecycle smoke harness
+- **`tests/real-machine-test.ps1` is a single *driver*** — it runs on one operator box
+  and reaches all three targets over SSH. It is not a per-target artifact, so it has no
+  `.sh` twin; a bash copy would just re-implement the same orchestration from a different
+  shell. (The cross-platform parity invariant in `CLAUDE.md` covers the **CLI's**
+  interface, not internal dev tooling.)
+
+The driver is written in PowerShell because its credential model — Posh-SSH plus an
+in-memory `SecureString` sourced from `op read` — keeps the SSH password off argv and
+disk. PowerShell 7, Posh-SSH, and the `op` CLI are all cross-platform, so the driver
+runs anywhere `pwsh` is installed, not just Windows:
+
+```bash
+pwsh -File tests/real-machine-test.ps1 -Ref my-branch   # Linux, macOS, or Windows control box
+```
+
 ## Safety model
 
 - **The suites and smoke harness are hermetic / sandboxed** — they point
