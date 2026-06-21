@@ -28,17 +28,20 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Run PowerShell integration tests (pwsh 7)
+      # The full unit suite runs under BOTH PowerShell versions: pwsh 7 and Windows
+      # PowerShell 5.1. The production entry point (claudectl.cmd) runs the script via
+      # `powershell` (5.1), which reads a no-BOM .ps1 as Windows-1252 — so non-ASCII in
+      # a string breaks parsing there but not under pwsh 7. Testing both is mandatory.
+      - name: Unit suite under pwsh 7
         shell: pwsh
-        run: pwsh -File tests/test_claudectl.ps1
-      # The production entry point (claudectl.cmd) runs claudectl.ps1 under Windows
-      # PowerShell 5.1, NOT pwsh 7. 5.1 reads a no-BOM .ps1 as Windows-1252, so any
-      # non-ASCII byte in a string breaks parsing. This step guards that real path:
-      # parse-check + the smoke harness, which invokes the script via `powershell` (5.1).
-      - name: Smoke test under Windows PowerShell 5.1 (production .cmd path)
+        run: pwsh -NoProfile -File tests/test_claudectl.ps1
+      - name: Unit suite under Windows PowerShell 5.1 (production path) + parse guard
         shell: powershell
         run: |
           $e = $null; $t = $null
           [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PWD 'scripts\claudectl.ps1'), [ref]$t, [ref]$e) | Out-Null
           if ($e) { $e | ForEach-Object { Write-Host "::error::claudectl.ps1:$($_.Extent.StartLineNumber) $($_.Message)" }; exit 1 }
-          powershell -NoProfile -File tests/smoke.ps1
+          powershell -NoProfile -File tests/test_claudectl.ps1
+      - name: Smoke harness under Windows PowerShell 5.1
+        shell: powershell
+        run: powershell -NoProfile -File tests/smoke.ps1

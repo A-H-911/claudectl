@@ -20,7 +20,12 @@ $pass = 0; $fail = 0
 
 function ok  { param([string]$msg)                    Write-Host "  PASS $msg" -ForegroundColor Green; $script:pass++ }
 function err { param([string]$label,[string]$detail)  Write-Host "  FAIL ${label}: $detail" -ForegroundColor Red; $script:fail++ }
-function run { pwsh -NoProfile -File $SCRIPT @args }
+# Drive claudectl.ps1 under the SAME PowerShell that runs this suite, so it can be
+# validated under both Windows PowerShell 5.1 (the production claudectl.cmd path) and
+# pwsh 7. -ExecutionPolicy Bypass mirrors claudectl.cmd. Override with $env:CLAUDECTL_PS.
+$PSExe = if ($env:CLAUDECTL_PS) { $env:CLAUDECTL_PS } else { try { (Get-Process -Id $PID).Path } catch { $null } }
+if (-not $PSExe) { $PSExe = if ($PSVersionTable.PSEdition -eq 'Core') { 'pwsh' } else { 'powershell' } }
+function run { & $PSExe -NoProfile -ExecutionPolicy Bypass -File $SCRIPT @args }
 
 # ── add ───────────────────────────────────────────────────────────────────────
 Write-Host "`n=== add ==="

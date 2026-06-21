@@ -1,0 +1,11 @@
+{
+  "_comment": "Copy to tests/real-machine-hosts.json (gitignored) and fill in. Used by tests/real-machine-test.ps1.",
+  "repo_url": "https://github.com/A-H-911/claudectl.git",
+  "ref": "main",
+  "vault": "Personal",
+  "hosts": [
+    { "name": "linux",   "type": "linux",   "op_item": "ssh-my-linux-host" },
+    { "name": "macos",   "type": "macos",   "op_item": "ssh-my-mac" },
+    { "name": "windows", "type": "windows", "op_item": "ssh-my-windows-host" }
+  ]
+}

@@ -102,6 +102,25 @@ if command -v python3 >/dev/null 2>&1; then
         && ok "status --json: valid array" || err "status --json" "invalid"
 fi
 
+# ── status: live process attribution (the real per-instance code path) ──────────
+# Linux attributes a running CLAUDE_CONFIG_DIR process to its instance via procfs;
+# macOS has no procfs and returns a clean empty result; skip elsewhere (Git Bash).
+case "$(uname -s)" in
+  Linux)
+    CLAUDE_CONFIG_DIR="$CLAUDECTL_BASE/smoke" sleep 30 &
+    _sp=$!; sleep 1
+    sj="$(run status --json 2>/dev/null)"
+    case "$sj" in
+      *'"instance":"smoke"'*) ok "status: live process attributed to its instance" ;;
+      *)                      err "status:attribution" "running smoke pid not attributed" ;;
+    esac
+    kill "$_sp" 2>/dev/null ;;
+  Darwin)
+    run status >/dev/null 2>&1 && ok "status: clean exit, no procfs (macOS)" || err "status:macos" "non-zero" ;;
+  *)
+    note "status live-attribution: skipped on $(uname -s)" ;;
+esac
+
 # ── spawn --dry-run must NOT execute ────────────────────────────────────────────
 dry="$(run spawn smoke --dry-run 2>&1)"
 [[ "$dry" == *claude-smoke* ]]       && ok "spawn --dry-run: prints launcher"  || err "spawn:dry-path" "launcher missing"
