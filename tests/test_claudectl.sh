@@ -336,6 +336,98 @@ out=$(run --help);    [[ "$out" == *usage:*    ]] && ok "alias: '--help' dispatc
 out=$(run -h);        [[ "$out" == *usage:*    ]] && ok "alias: '-h' dispatches to help"            || err "alias:-h" "no usage banner"
 out=$(run);           [[ "$out" == *usage:*    ]] && ok "no-arg invocation defaults to help"        || err "no-arg" "no usage banner"
 
+# ── security: path-traversal rejection (v0.2.4) ─────────────────────────────────
+# A name that escapes $BASE via '..' must be rejected by validate_name on EVERY
+# command, not just add. A real dir outside $BASE must survive reset/remove.
+printf "\n=== security: path traversal ===\n"
+SENTINEL="$TMPROOT/sentinel-survives"          # == $BASE/../sentinel-survives
+mkdir -p "$SENTINEL"; : > "$SENTINEL/keep"
+trav="../sentinel-survives"
+for c in path config token reset remove clone; do
+    case "$c" in
+        clone)        run clone "$trav" "$trav" </dev/null >/dev/null 2>&1; code=$? ;;
+        reset|remove) run "$c" "$trav" --force </dev/null >/dev/null 2>&1; code=$? ;;
+        *)            run "$c" "$trav" </dev/null >/dev/null 2>&1; code=$? ;;
+    esac
+    [ $code -ne 0 ] && ok "traversal: '$c $trav' rejected (exit $code)" || err "traversal:$c" "accepted traversal name!"
+done
+{ [ -d "$SENTINEL" ] && [ -f "$SENTINEL/keep" ]; } \
+    && ok "traversal: dir outside BASE survived (no rm -rf escape)" || err "traversal:sentinel" "SECURITY: external dir was deleted!"
+
+# ── security: launcher injection regression (NOTE-4) ────────────────────────────
+# A $(...) embedded in CLAUDECTL_BASE must be neutralised in the generated launcher,
+# so running the launcher does NOT execute it. ($() is a legal dir name on Linux/macOS;
+# skip on Git Bash where crafting such a dir name is impractical.)
+printf "\n=== security: launcher injection ===\n"
+if is_gitbash; then
+    skip "launcher injection regression (impractical \$() dir name on Git Bash)"
+else
+    INJ="$TMPROOT/inj"; mkdir -p "$INJ/bin"
+    export PWNEDFILE="$INJ/PWNED"
+    INJ_BASE="$INJ/\$(touch \$PWNEDFILE)"      # literal basename: $(touch $PWNEDFILE) — no slash
+    mkdir -p "$INJ_BASE"
+    cp "$REPO_ROOT/tests/helpers/fake-claude" "$INJ/bin/claude"; chmod +x "$INJ/bin/claude"
+    CLAUDECTL_BASE="$INJ_BASE" CLAUDECTL_BIN="$INJ/bin" bash "$SCRIPT" add victim >/dev/null 2>&1
+    PWNEDFILE="$INJ/PWNED" "$INJ/bin/claude-victim" --version >/dev/null 2>&1
+    [ ! -e "$INJ/PWNED" ] \
+        && ok "launcher: \$() in CLAUDECTL_BASE did not execute (injection blocked)" \
+        || err "launcher:injection" "SECURITY: command substitution in path executed!"
+    unset PWNEDFILE
+fi
+
+# ── security: clone --deep strips NESTED credentials (NOTE-5) ───────────────────
+printf "\n=== security: clone --deep nested creds ===\n"
+run add nestsrc >/dev/null 2>&1; run add nestdst >/dev/null 2>&1
+mkdir -p "$CLAUDECTL_BASE/nestsrc/projects/sub"
+printf '{"oauthToken":"NESTED"}' > "$CLAUDECTL_BASE/nestsrc/projects/sub/.credentials.json"
+printf '{"a":1}' > "$CLAUDECTL_BASE/nestsrc/settings.json"
+run clone nestsrc nestdst --deep >/dev/null 2>&1
+nested_found=$(find "$CLAUDECTL_BASE/nestdst" -name '.credentials.json' 2>/dev/null | head -1)
+[ -z "$nested_found" ] && ok "clone --deep: nested .credentials.json swept (security)" \
+                       || err "clone-deep:nested" "SECURITY: nested credential survived"
+
+# ── security: config key charset (NOTE-6) ───────────────────────────────────────
+printf "\n=== security: config key charset ===\n"
+run add cfgkeytest >/dev/null 2>&1
+run config cfgkeytest 'bad|key' val 2>/dev/null; code=$?
+[ $code -ne 0 ] && ok "config: metacharacter key rejected" || err "config:badkey" "accepted 'bad|key'"
+run config cfgkeytest "a.b" "v" >/dev/null 2>&1; code=$?
+[ $code -eq 0 ] && ok "config: dotted key still works (nested-path feature kept)" || err "config:dotkey" "rejected a.b (exit $code)"
+
+# ── security: self-update checksum (LOW-2) ──────────────────────────────────────
+# Hermetic via file:// — never points --update at the real script. Droppable: skip
+# on Git Bash / when curl or a sha256 tool is absent.
+printf "\n=== security: self-update checksum ===\n"
+if is_gitbash; then
+    skip "self-update checksum (file:// + sha256 portability unreliable on Git Bash)"
+elif ! command -v curl >/dev/null 2>&1; then
+    skip "self-update checksum (curl absent)"
+elif ! { command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1 || command -v openssl >/dev/null 2>&1; }; then
+    skip "self-update checksum (no sha256 tool)"
+else
+    sha_tool() {
+        if   command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
+        elif command -v shasum    >/dev/null 2>&1; then shasum -a 256 "$1" | cut -d' ' -f1
+        else openssl dgst -sha256 "$1" | awk '{print $NF}'; fi
+    }
+    UPD="$TMPROOT/upd"; mkdir -p "$UPD"
+    cp "$SCRIPT" "$UPD/claudectl"
+    printf '#!/usr/bin/env bash\necho REPLACED\n' > "$UPD/payload"
+    before=$(cat "$UPD/claudectl")
+    CLAUDECTL_UPDATE_URL="file://$UPD/payload" CLAUDECTL_UPDATE_SHA256="deadbeef" \
+        bash "$UPD/claudectl" setup --update >/dev/null 2>&1; code=$?
+    after=$(cat "$UPD/claudectl")
+    { [ $code -ne 0 ] && [ "$before" = "$after" ]; } \
+        && ok "self-update: checksum mismatch aborts, script unchanged" \
+        || err "selfupdate:mismatch" "exit $code, changed=$([ "$before" = "$after" ] && echo no || echo yes)"
+    good=$(sha_tool "$UPD/payload")
+    CLAUDECTL_UPDATE_URL="file://$UPD/payload" CLAUDECTL_UPDATE_SHA256="$good" \
+        bash "$UPD/claudectl" setup --update >/dev/null 2>&1
+    grep -q REPLACED "$UPD/claudectl" \
+        && ok "self-update: correct checksum installs payload" \
+        || err "selfupdate:match" "payload not installed"
+fi
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 printf "\n"
 printf "Results: \033[32m%d passed\033[0m, \033[31m%d failed\033[0m\n" "$pass" "$fail"

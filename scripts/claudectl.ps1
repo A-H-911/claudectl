@@ -2,8 +2,10 @@
 # claudectl.ps1 - manage isolated Claude Code instances (Windows PowerShell)
 # https://github.com/A-H-911/claudectl  <- update this when forking
 
-$VERSION = "0.2.3"
+$VERSION = "0.2.4"
 $CLAUDECTL_UPDATE_URL = if ($env:CLAUDECTL_UPDATE_URL) { $env:CLAUDECTL_UPDATE_URL } else { "https://raw.githubusercontent.com/A-H-911/claudectl/main/scripts/claudectl.ps1" }
+# Optional: pin the expected SHA-256 of the update payload to verify before install.
+$CLAUDECTL_UPDATE_SHA256 = if ($env:CLAUDECTL_UPDATE_SHA256) { $env:CLAUDECTL_UPDATE_SHA256 } else { "" }
 $BASE = if ($env:CLAUDECTL_BASE) { $env:CLAUDECTL_BASE } else { "$env:USERPROFILE\.claude-instances" }
 $BIN  = if ($env:CLAUDECTL_BIN)  { $env:CLAUDECTL_BIN  } else { "$env:USERPROFILE\.local\bin" }
 
@@ -25,6 +27,10 @@ function Confirm-Prompt {
 function Assert-Instance {
     param([string]$name)
     if ($name -eq "vanilla") { return }
+    # Validate before any filesystem use so a name like '..\x' can never resolve
+    # outside $BASE (path traversal). Every legitimate instance is created by
+    # cmd_add, which already validates, so this rejects only traversal/garbage.
+    Test-ValidName $name
     if (-not (Test-Path "$BASE\$name" -PathType Container)) {
         Die "instance '$name' not found - run 'claudectl list' to see available instances"
     }
@@ -34,6 +40,16 @@ function Test-ValidName {
     param([string]$name)
     if ($name -notmatch '^[a-zA-Z0-9][-a-zA-Z0-9_]*$') {
         Die "invalid name '$name' - use letters, numbers, hyphens, underscores only (no spaces)"
+    }
+}
+
+# Restrict a config dir to the current user and warn (not fail) if icacls could
+# not apply it - otherwise a credentials dir could silently keep inherited ACLs.
+function Set-InstanceAcl {
+    param([string]$dir)
+    icacls $dir /inheritance:d /grant:r "${env:USERNAME}:(OI)(CI)F" *> $null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "could not restrict permissions on $dir (icacls exit $LASTEXITCODE) - verify it is not accessible to other users"
     }
 }
 
@@ -51,10 +67,12 @@ function cmd_add {
     }
 
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
-    icacls $dir /inheritance:d /grant:r "${env:USERNAME}:(OI)(CI)F" 2>$null | Out-Null
+    Set-InstanceAcl $dir
 
-    # Launcher expands $dir and $BIN at creation time - CLAUDECTL_BIN override works in tests
-    $launcherContent = "@echo off`r`nsetlocal`r`nset CLAUDE_CONFIG_DIR=$dir`r`n`"$BIN\claude.exe`" %*"
+    # Launcher expands $dir and $BIN at creation time - CLAUDECTL_BIN override works in tests.
+    # The safe-set idiom  set "VAR=value"  stops & | < > ^ in the path from being
+    # parsed by cmd.exe when the launcher runs (residual risk: operator-set CLAUDECTL_BASE).
+    $launcherContent = "@echo off`r`nsetlocal`r`nset `"CLAUDE_CONFIG_DIR=$dir`"`r`n`"$BIN\claude.exe`" %*"
     Set-Content -Path $launcher -Value $launcherContent -Encoding ascii
 
     Write-Host "created instance `"$name`""
@@ -126,7 +144,7 @@ function cmd_reset {
     Confirm-Prompt "wipe all config in '$name'? this cannot be undone" -Force:$Force
     Remove-Item -Path $dir -Recurse -Force
     New-Item -ItemType Directory -Path $dir -Force | Out-Null
-    icacls $dir /inheritance:d /grant:r "${env:USERNAME}:(OI)(CI)F" 2>$null | Out-Null
+    Set-InstanceAcl $dir
     Write-Host "reset instance `"$name`" - config dir wiped, launcher kept"
 }
 
@@ -232,6 +250,11 @@ function cmd_clone {
         Get-ChildItem $srcDir -Force | Where-Object { $denylist -notcontains $_.Name } | ForEach-Object {
             Copy-Item -Path $_.FullName -Destination $dstDir -Recurse -Force
         }
+        # Defense-in-depth: the denylist matches top-level names only, so a nested
+        # .credentials.json inside a copied subdir would slip through. Sweep the
+        # destination at any depth to guarantee no auth token is ever cloned.
+        Get-ChildItem $dstDir -Recurse -Force -Filter ".credentials.json" -ErrorAction SilentlyContinue |
+            Remove-Item -Force -ErrorAction SilentlyContinue
         Write-Host "deep-cloned `"$src`" -> `"$dst`" (credentials and cache excluded)"
     } else {
         $settingsFile = "$srcDir\settings.json"
@@ -317,13 +340,32 @@ function cmd_setup {
     param([switch]$Update)
 
     if ($Update) {
-        $tmp = [System.IO.Path]::GetTempFileName() + ".ps1"
+        $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("claudectl-update-" + [guid]::NewGuid().ToString('N') + ".ps1")
         Write-Host "downloading latest claudectl.ps1..."
         try {
             Invoke-WebRequest -Uri $CLAUDECTL_UPDATE_URL -OutFile $tmp -UseBasicParsing
         } catch {
             Remove-Item $tmp -Force -ErrorAction SilentlyContinue
             Die "update download failed: $_"
+        }
+        # Sanity: a truncated download or an HTML error page is not a claudectl script.
+        $firstLine = Get-Content $tmp -TotalCount 1 -ErrorAction SilentlyContinue
+        if ((-not (Test-Path $tmp)) -or ((Get-Item $tmp).Length -eq 0) -or ($firstLine -notmatch '^#!')) {
+            Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+            Die "downloaded file is not a valid script (empty or missing shebang)"
+        }
+        # Integrity: verify against a pinned checksum when provided; otherwise warn.
+        # The warning is advisory only - it does NOT block the update. Real protection
+        # comes solely from pinning CLAUDECTL_UPDATE_SHA256.
+        if ($CLAUDECTL_UPDATE_SHA256) {
+            $got = (Get-FileHash -Path $tmp -Algorithm SHA256).Hash
+            if ($got -ne $CLAUDECTL_UPDATE_SHA256.ToUpper()) {
+                Remove-Item $tmp -Force -ErrorAction SilentlyContinue
+                Die "checksum mismatch - refusing to install (expected $CLAUDECTL_UPDATE_SHA256, got $got)"
+            }
+            Write-Host "checksum verified."
+        } else {
+            Write-Warning "update is unverified (no CLAUDECTL_UPDATE_SHA256 pinned); this does NOT block the update."
         }
         $scriptPath = $MyInvocation.PSCommandPath
         Copy-Item $tmp $scriptPath -Force
@@ -374,7 +416,7 @@ function cmd_help {
             "config"  { Write-Host "claudectl config <name> [<key> [<value>]]`nRead/write settings.json." }
             "token"   { Write-Host "claudectl token <name>`nShow credentials path and CI hint. Exits 1 if not logged in." }
             "version" { Write-Host "claudectl version`nPrint claudectl + claude versions." }
-            "setup"   { Write-Host "claudectl setup [--update]`nConfigure user PATH (registry) and verify install. Missing Claude Code is a note, not an error. --update: download latest." }
+            "setup"   { Write-Host "claudectl setup [--update]`nConfigure user PATH (registry) and verify install. Missing Claude Code is a note, not an error. --update: download latest (set CLAUDECTL_UPDATE_SHA256 to verify the download; otherwise an advisory 'unverified' warning is printed)." }
             default   { Die "unknown command '$sub'" }
         }
         return
@@ -404,6 +446,7 @@ environment:
   CLAUDECTL_BASE          instance storage root (default: %USERPROFILE%\.claude-instances)
   CLAUDECTL_BIN           binary/launcher dir (default: %USERPROFILE%\.local\bin)
   CLAUDECTL_UPDATE_URL    self-update source URL
+  CLAUDECTL_UPDATE_SHA256 expected SHA-256 of the update payload (verified on --update)
 "@
 }
 

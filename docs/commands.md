@@ -210,6 +210,10 @@ After wiring PATH, setup reports whether the Claude Code binary is present. A mi
 
 **Flags:**
 - `--update` — self-update claudectl from `$CLAUDECTL_UPDATE_URL`. Requires `curl`.
+  Set `$CLAUDECTL_UPDATE_SHA256` to verify the download against a pinned SHA-256 before install
+  (a mismatch aborts and the script is left untouched). Without it, the update proceeds over HTTPS
+  with an **advisory** "unverified" warning — the warning does not block the update; only a pinned
+  checksum protects against a compromised source.
 
 ```bash
 claudectl setup
@@ -235,3 +239,4 @@ claudectl setup --update
 | `CLAUDECTL_BASE` | `~/.claude-instances` | Instance storage root |
 | `CLAUDECTL_BIN` | `~/.local/bin` | Binary/launcher installation dir |
 | `CLAUDECTL_UPDATE_URL` | GitHub raw URL | Self-update source |
+| `CLAUDECTL_UPDATE_SHA256` | _(unset)_ | Expected SHA-256 of the update payload; verified on `setup --update` |
