@@ -94,13 +94,46 @@ function Test-WindowsHost($sid, $repo, $ref) {
   $res
 }
 
+# --- Optional Hyper-V snapshot guard (opt-in per host) -----------------------
+# Routine runs are hermetic (temp dirs only), so snapshots are NOT required. This is
+# belt-and-suspenders for operators who want every run reverted. It engages ONLY for a
+# host that sets "snapshot": true and "vm_name" in the config; the physical Mac never
+# sets it. Fail-safe: if a snapshot is requested but cannot be taken, the host errors
+# rather than running unprotected. New-HostSnapshot returns the checkpoint name (or null).
+function New-HostSnapshot($h) {
+  if (-not $h.snapshot) { return $null }
+  if (-not $h.vm_name)  { throw "host '$($h.name)' sets snapshot:true but no vm_name" }
+  if (-not (Get-Command Checkpoint-VM -ErrorAction SilentlyContinue)) {
+    throw "snapshot requested for '$($h.name)' but Hyper-V cmdlets are unavailable on this control box"
+  }
+  $snap = "claudectl-test-$([guid]::NewGuid().ToString('N').Substring(0,8))"
+  Write-Host "  snapshot: checkpointing '$($h.vm_name)' -> $snap" -ForegroundColor DarkCyan
+  Checkpoint-VM -Name $h.vm_name -SnapshotName $snap -ErrorAction Stop
+  return $snap
+}
+
+# Revert the VM to the checkpoint, then delete the checkpoint. Runs in finally so it
+# always fires once a checkpoint exists; a restore failure warns but never aborts the run.
+function Restore-HostSnapshot($h, $snap) {
+  if (-not $snap) { return }
+  try {
+    Write-Host "  snapshot: restoring '$($h.vm_name)' <- $snap" -ForegroundColor DarkCyan
+    Restore-VMSnapshot -VMName $h.vm_name -Name $snap -Confirm:$false -ErrorAction Stop
+    Remove-VMSnapshot  -VMName $h.vm_name -Name $snap -Confirm:$false -ErrorAction SilentlyContinue
+  } catch {
+    Write-Host "  WARNING: snapshot restore failed for '$($h.vm_name)': $($_.Exception.Message) (checkpoint '$snap' left in place)" -ForegroundColor Yellow
+  }
+}
+
 $report = [ordered]@{}
 $anyFail = $false
 foreach ($h in $cfg.hosts) {
   if ($Only -and ($Only -notcontains $h.name)) { continue }
   Write-Host "`n=== $($h.name) [$($h.type)] ===" -ForegroundColor Cyan
   $vault = if ($h.vault) { $h.vault } else { $vaultDefault }
+  $snap = $null
   try {
+    $snap = New-HostSnapshot $h
     $hc = New-HostCred $h.op_item $vault
     $s = New-SSHSession -ComputerName $hc.HostName -Port 22 -Credential $hc.Cred -AcceptKey -ConnectionTimeout 25
     $rows = if ($h.type -eq 'windows') { Test-WindowsHost $s.SessionId $repo $Ref } else { Test-UnixHost $s.SessionId $repo $Ref }
@@ -116,6 +149,8 @@ foreach ($h in $cfg.hosts) {
     $anyFail = $true
     Write-Host "  ERROR: $($_.Exception.Message)" -ForegroundColor Red
     $report["$($h.name)"] = "ERROR: $($_.Exception.Message)"
+  } finally {
+    Restore-HostSnapshot $h $snap
   }
 }
 
