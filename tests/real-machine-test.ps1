@@ -22,12 +22,16 @@
 #   pwsh -File tests/real-machine-test.ps1 -Only linux     # one host
 [CmdletBinding()]
 param(
-  [string]$ConfigPath = (Join-Path $PSScriptRoot 'real-machine-hosts.json'),
+  [string]$ConfigPath,
   [string]$Ref,
   [string[]]$Only
 )
 $ErrorActionPreference = 'Stop'
 
+if (-not $ConfigPath) {
+  $here = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+  $ConfigPath = Join-Path $here 'real-machine-hosts.json'
+}
 if (-not (Test-Path $ConfigPath)) {
   throw "config not found: $ConfigPath`nCopy tests/real-machine-hosts.example.json to tests/real-machine-hosts.json and fill it in."
 }
@@ -52,10 +56,12 @@ function Invoke-Remote($sid, $command, $timeout = 180) {
 }
 
 # Pull the last "N passed, M failed" tally out of test output (handles bash and PS).
+# Bash output wraps the numbers in ANSI colour codes, so strip those first.
 function Get-Tally($text) {
-  $m = [regex]::Matches([string]$text, '\d+ passed, \d+ failed')
+  $clean = [regex]::Replace([string]$text, "\x1b\[[0-9;]*m", "")
+  $m = [regex]::Matches($clean, '\d+ passed, \d+ failed')
   if ($m.Count) { $m[$m.Count - 1].Value }
-  else { 'NO RESULT: ' + (([string]$text -split "`n") | Where-Object { $_ } | Select-Object -Last 1) }
+  else { 'NO RESULT: ' + (($clean -split "`n") | Where-Object { $_ } | Select-Object -Last 1) }
 }
 
 function Test-UnixHost($sid, $repo, $ref) {
@@ -63,8 +69,8 @@ function Test-UnixHost($sid, $repo, $ref) {
   $out = Invoke-Remote $sid $clone 90
   if ($out -notmatch 'READY:(\S+)') { return @([pscustomobject]@{ Name = 'clone'; Result = "FAILED: $out" }) }
   $dir = $Matches[1]
-  $suite = Get-Tally (Invoke-Remote $sid "cd $dir && bash tests/test_claudectl.sh 2>&1 | grep -oE '[0-9]+ passed, [0-9]+ failed' | tail -1")
-  $smoke = Get-Tally (Invoke-Remote $sid "cd $dir && bash tests/smoke.sh 2>&1 | grep -oE '[0-9]+ passed, [0-9]+ failed' | tail -1")
+  $suite = Get-Tally (Invoke-Remote $sid "cd $dir && bash tests/test_claudectl.sh 2>&1 | grep passed | tail -1")
+  $smoke = Get-Tally (Invoke-Remote $sid "cd $dir && bash tests/smoke.sh 2>&1 | grep passed | tail -1")
   Invoke-Remote $sid "rm -rf $dir" 30 | Out-Null
   @(
     [pscustomobject]@{ Name = 'unit suite (bash)'; Result = $suite },
