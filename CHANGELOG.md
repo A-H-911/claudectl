@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.2.4] — 2026-06-21
+
+### Security
+
+- **Path traversal closed on every command.** `validate_name`/`Test-ValidName` now runs inside
+  `require_instance`/`Assert-Instance`, not just `add`, so a name like `../x` (or `..\x`) can no
+  longer resolve outside `$CLAUDECTL_BASE`. Previously `reset`/`remove --purge` could `rm -rf` an
+  external directory, and `config`/`clone`/`path`/`token` could read or write outside the root.
+- **Launcher injection hardened.** The generated launcher neutralises shell/cmd metacharacters in
+  the config path: bash double-quote-escapes `\ " $ \`` (so `$(...)` in `CLAUDECTL_BASE`/`HOME`
+  cannot execute when the launcher runs), and the Windows `.cmd` uses the `set "VAR=value"` idiom
+  (so `& | < > ^` are contained). Residual risk is operator-controlled env only; covered by a new
+  injection regression test.
+- **`clone --deep` strips nested credentials.** The denylist matched top-level names only; the
+  destination is now swept for `.credentials.json` at any depth, so an auth token can never be
+  cloned regardless of nesting.
+- **`config` rejects metacharacter keys (bash).** A settings key is validated before it is
+  interpolated into jq, preventing jq-program injection while keeping documented nested paths
+  (e.g. `hooks.0.command`) working.
+- **Windows: `icacls` failures are no longer silent.** A config dir that could not be
+  ACL-restricted now emits a warning instead of silently keeping inherited permissions.
+- **Optional self-update integrity.** Set `CLAUDECTL_UPDATE_SHA256` to verify the downloaded update
+  against a pinned SHA-256 before install (mismatch aborts); a shebang/non-empty sanity check is
+  always applied. Without a pinned checksum the update still proceeds over HTTPS with an **advisory**
+  "unverified" warning — the warning does **not** block the update; only pinning the checksum
+  protects against a compromised source.
+
 ## [0.2.3] — 2026-06-21
 
 ### Added

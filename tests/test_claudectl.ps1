@@ -255,6 +255,46 @@ if ($out -like "*usage:*") { ok "alias: '-h' dispatches to help" } else { err "a
 $out = run
 if ($out -like "*usage:*") { ok "no-arg invocation defaults to help" } else { err "no-arg" "no usage banner" }
 
+# ── security: path-traversal rejection (v0.2.4) ─────────────────────────────────
+# A name escaping $BASE via '..' must be rejected by Test-ValidName on EVERY command,
+# not just add. A real dir outside $BASE must survive reset/remove.
+Write-Host "`n=== security: path traversal ==="
+$SENTINEL = Join-Path $TMPROOT "sentinel-survives"   # == $BASE\..\sentinel-survives
+New-Item -ItemType Directory -Path $SENTINEL -Force | Out-Null
+Set-Content "$SENTINEL\keep" "x" -Encoding ascii
+$trav = "..\sentinel-survives"
+foreach ($c in @("path","config","token","reset","remove","clone")) {
+    if     ($c -eq "clone")            { $null = run clone $trav $trav 2>&1 }
+    elseif ($c -in @("reset","remove")) { $null = run $c $trav --force 2>&1 }
+    else                                { $null = run $c $trav 2>&1 }
+    $code = $LASTEXITCODE
+    if ($code -ne 0) { ok "traversal: '$c $trav' rejected (exit $code)" } else { err "traversal:$c" "accepted traversal name!" }
+}
+if ((Test-Path $SENTINEL -PathType Container) -and (Test-Path "$SENTINEL\keep")) {
+    ok "traversal: dir outside BASE survived (no Remove-Item escape)"
+} else { err "traversal:sentinel" "SECURITY: external dir was deleted!" }
+
+# ── security: clone --deep strips NESTED credentials (NOTE-5) ───────────────────
+Write-Host "`n=== security: clone --deep nested creds ==="
+run add nestsrc *> $null; run add nestdst *> $null
+New-Item -ItemType Directory "$env:CLAUDECTL_BASE\nestsrc\projects\sub" -Force | Out-Null
+Set-Content "$env:CLAUDECTL_BASE\nestsrc\projects\sub\.credentials.json" '{"oauthToken":"NESTED"}' -Encoding utf8
+Set-Content "$env:CLAUDECTL_BASE\nestsrc\settings.json" '{"a":1}' -Encoding utf8
+run clone nestsrc nestdst --deep *> $null
+$nested = Get-ChildItem "$env:CLAUDECTL_BASE\nestdst" -Recurse -Force -Filter ".credentials.json" -ErrorAction SilentlyContinue
+if (-not $nested) { ok "clone --deep: nested .credentials.json swept (security)" } else { err "clone-deep:nested" "SECURITY: nested credential survived" }
+
+# ── security: launcher safe-set idiom (NOTE-4) ──────────────────────────────────
+# A path containing & must be wrapped as  set "VAR=value"  so cmd.exe can't run it.
+Write-Host "`n=== security: launcher safe-set ==="
+$ampBase = Join-Path $TMPROOT "amp&base"; New-Item -ItemType Directory -Path $ampBase -Force | Out-Null
+$ampBin  = Join-Path $TMPROOT "ampbin";   New-Item -ItemType Directory -Path $ampBin  -Force | Out-Null
+$env:CLAUDECTL_BASE = $ampBase; $env:CLAUDECTL_BIN = $ampBin
+run add ampinst *> $null
+$lc = Get-Content "$ampBin\claude-ampinst.cmd" -Raw
+$env:CLAUDECTL_BASE = "$TMPROOT\instances"; $env:CLAUDECTL_BIN = "$TMPROOT\bin"   # restore sandbox
+if ($lc -match 'set "CLAUDE_CONFIG_DIR=') { ok "launcher: uses safe-set idiom (& in path contained)" } else { err "launcher:safeset" "set not quoted" }
+
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 Remove-Item -Path $TMPROOT -Recurse -Force -ErrorAction SilentlyContinue
 $env:CLAUDECTL_BASE = $null
