@@ -30,7 +30,7 @@ $pass = 0; $fail = 0
 function ok   { param([string]$m) Write-Host "  PASS $m" -ForegroundColor Green; $script:pass++ }
 function err  { param([string]$l,[string]$d) Write-Host "  FAIL ${l}: $d" -ForegroundColor Red; $script:fail++ }
 function note { param([string]$m) Write-Host "  NOTE $m" -ForegroundColor Yellow }
-function run  { powershell -NoProfile -File $SCRIPT @args }
+function run  { powershell -NoProfile -ExecutionPolicy Bypass -File $SCRIPT @args }
 
 # Provision the sandbox claude the launcher will invoke.
 $realClaude = (Get-Command claude -ErrorAction SilentlyContinue)
