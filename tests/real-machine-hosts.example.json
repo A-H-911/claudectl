@@ -1,11 +1,12 @@
 {
   "_comment": "Copy to tests/real-machine-hosts.json (gitignored) and fill in. Used by tests/real-machine-test.ps1.",
+  "_comment_snapshot": "Optional per host: set snapshot:true + vm_name to checkpoint a Hyper-V guest before the run and revert it after. Runs are hermetic so this is opt-in belt-and-suspenders; omit it (e.g. a physical Mac) to just run the tests. Requires Hyper-V cmdlets on the control box.",
   "repo_url": "https://github.com/A-H-911/claudectl.git",
   "ref": "main",
   "vault": "Personal",
   "hosts": [
-    { "name": "linux",   "type": "linux",   "op_item": "ssh-my-linux-host" },
+    { "name": "linux",   "type": "linux",   "op_item": "ssh-my-linux-host",   "snapshot": true, "vm_name": "my-linux-vm" },
     { "name": "macos",   "type": "macos",   "op_item": "ssh-my-mac" },
-    { "name": "windows", "type": "windows", "op_item": "ssh-my-windows-host" }
+    { "name": "windows", "type": "windows", "op_item": "ssh-my-windows-host", "snapshot": true, "vm_name": "my-windows-vm" }
   ]
 }

@@ -56,8 +56,15 @@ pwsh -File tests/real-machine-test.ps1 -Ref my-branch   # Linux, macOS, or Windo
   `CLAUDECTL_BASE`/`CLAUDECTL_BIN` (and `HOME` for the `setup` test) at temp dirs and never
   touch the host's real `~/.claude-instances`, launchers, rc files, or registry. So routine
   runs need **no VM snapshot** — nothing on the target is modified.
-- Snapshots are only warranted for genuinely destructive one-offs (e.g. removing a predecessor
-  tool), not for this test loop.
+- Snapshots are therefore **not required** for this test loop, and are **off by default**. They are
+  only warranted for genuinely destructive one-offs (e.g. removing a predecessor tool).
+- **Opt-in snapshot guard (belt-and-suspenders).** For a Hyper-V guest you still want reverted after
+  every run, set `"snapshot": true` and `"vm_name": "<guest>"` on that host in the config. The driver
+  then `Checkpoint-VM`s before the run and `Restore-VMSnapshot` + `Remove-VMSnapshot` after (in a
+  `finally`, so it reverts even if the suite fails). It engages **only** for hosts that set it — a
+  physical Mac (no VM) simply omits it. Fail-safe: if a snapshot is requested but can't be taken
+  (Hyper-V cmdlets absent on the control box, missing `vm_name`), that host is reported as an error
+  rather than silently run unprotected. Requires the Hyper-V module + rights on the control box.
 - **Credentials never touch a log, argv, or disk.** SSH passwords are read from 1Password
   (read-only) straight into in-memory `SecureString`s; `op://` *references* are config, the
   resolved values are not printed.
@@ -89,9 +96,10 @@ cp tests/real-machine-hosts.example.json tests/real-machine-hosts.json
   "ref": "main",                 // default git ref to clone on each host
   "vault": "Personal",           // 1Password vault holding the items
   "hosts": [
-    { "name": "linux",   "type": "linux",   "op_item": "ssh-my-linux-host" },
-    { "name": "macos",   "type": "macos",   "op_item": "ssh-my-mac" },
-    { "name": "windows", "type": "windows", "op_item": "ssh-my-windows-host" }
+    // snapshot+vm_name are OPTIONAL — add them only for a Hyper-V guest you want reverted each run.
+    { "name": "linux",   "type": "linux",   "op_item": "ssh-my-linux-host",   "snapshot": true, "vm_name": "my-linux-vm" },
+    { "name": "macos",   "type": "macos",   "op_item": "ssh-my-mac" },                          // physical Mac: no snapshot
+    { "name": "windows", "type": "windows", "op_item": "ssh-my-windows-host", "snapshot": true, "vm_name": "my-windows-vm" }
   ]
 }
 ```
